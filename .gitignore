@@ -1,5 +1,2 @@
-# Visual Studio 2019 cache/options directory
+**/target/
 .vs/
-
-# Add this line
-out/
