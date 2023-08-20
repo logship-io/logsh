@@ -26,7 +26,6 @@ jobs:
         working-directory: ./logsh
       - name: 'Upload Artifact'
         uses: actions/upload-artifact@v2
-        working-directory: ./logsh
         with:
           name: ${{ env.PROJECT_NAME_UNDERSCORE }}
-          path: target/release/${{ env.PROJECT_NAME_UNDERSCORE }}
+          path: logsh/target/release/${{ env.PROJECT_NAME_UNDERSCORE }}
