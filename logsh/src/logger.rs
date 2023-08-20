@@ -1,15 +1,19 @@
-use log::{Record, Level, Metadata};
+use log::{Level, Metadata, Record};
 
-static mut LOGGER: ConsoleLogger = ConsoleLogger { level: Level::Error };
+static mut LOGGER: ConsoleLogger = ConsoleLogger {
+    level: Level::Error,
+};
 
 pub struct ConsoleLogger {
     level: Level,
 }
 
-pub fn install(level : Level) -> &'static ConsoleLogger {
+pub fn install(level: Level) -> &'static ConsoleLogger {
     // It's safe. Everyone chill.
     unsafe {
-        log::set_logger(&LOGGER).map(|()| log::set_max_level(level.to_level_filter())).unwrap();
+        log::set_logger(&LOGGER)
+            .map(|()| log::set_max_level(level.to_level_filter()))
+            .unwrap();
         LOGGER.set_log_level(level);
         &LOGGER
     }
@@ -23,7 +27,7 @@ impl ConsoleLogger {
 
 impl log::Log for ConsoleLogger {
     fn enabled(&self, metadata: &Metadata) -> bool {
-        return metadata.level() <= self.level;
+        metadata.level() <= self.level
     }
 
     fn log(&self, record: &Record) {
@@ -32,6 +36,5 @@ impl log::Log for ConsoleLogger {
         }
     }
 
-    fn flush(&self) {
-    }
+    fn flush(&self) {}
 }

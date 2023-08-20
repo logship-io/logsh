@@ -1,8 +1,13 @@
-use clap::{Subcommand, arg};
+use clap::{arg, Subcommand};
 use log::debug;
 use serde::Deserialize;
 use std::{collections::HashMap, error::Error};
-use term_table::{Table, table_cell::{TableCell, Alignment}, row::Row};
+use term_table::{
+    row::Row,
+    table_cell::{Alignment, TableCell},
+    Table,
+};
+use uuid::Uuid;
 
 use crate::config;
 
@@ -12,22 +17,25 @@ struct TokenResponse {
 }
 
 #[derive(Subcommand, Debug)]
+#[clap(about = "Connect to a Logship server.")]
 pub enum ConnectCommand {
-    Add{
+    #[clap(about = "Add a new connection.")]
+    Add {
+        #[arg(help = "Name of the connection. Just for your own reference.")]
         name: String,
+        #[arg(help = "Logship server. e.g. https://logship.io")]
         server: String,
-        #[arg(long)]
+        #[arg(long, help = "Set this connection as the default connection.")]
         default: bool,
 
-        #[arg(short, long)]
+        #[arg(short, long, help = "Username to authenticate with.")]
         user: String,
 
-        #[arg(short, long)]
+        #[arg(short, long, help = "Password to authenticate with.")]
         password: String,
     },
-    List{
-
-    }
+    #[clap(about = "List existing connections.")]
+    List {},
 }
 
 pub fn execute_connect(command: ConnectCommand) -> Result<(), Box<dyn Error>> {
@@ -66,18 +74,18 @@ fn fetch_token(server: String, user: String, password: String) -> Result<String,
 pub fn list() -> Result<(), Box<dyn Error>> {
     let existing_config = config::get_configuration()?;
     let mut table = Table::new();
-    table.add_row(Row::new(
-        vec![TableCell::new_with_alignment("Name", 1, Alignment::Center),
+    table.add_row(Row::new(vec![
+        TableCell::new_with_alignment("Name", 1, Alignment::Center),
         TableCell::new_with_alignment("Server", 1, Alignment::Center),
-        TableCell::new_with_alignment("Default", 1, Alignment::Center)]));
-    existing_config.connections.iter()
-        .for_each(|f| {
-            table.add_row(Row::new(vec![
-                TableCell::new_with_alignment(&f.name, 1, Alignment::Center),
-                TableCell::new_with_alignment(&f.server, 1, Alignment::Center),
-                TableCell::new_with_alignment(&f.default.to_string(), 1, Alignment::Center),
-            ]));
-        });
+        TableCell::new_with_alignment("Default", 1, Alignment::Center),
+    ]));
+    existing_config.connections.iter().for_each(|f| {
+        table.add_row(Row::new(vec![
+            TableCell::new_with_alignment(&f.name, 1, Alignment::Center),
+            TableCell::new_with_alignment(&f.server, 1, Alignment::Center),
+            TableCell::new_with_alignment(&f.default.to_string(), 1, Alignment::Center),
+        ]));
+    });
 
     println!("{}", table.render());
     Ok(())
@@ -120,6 +128,7 @@ pub fn connect(
                 server,
                 default: should_default,
                 token,
+                default_acccount_id: Uuid::nil().to_string(),
             });
         }
     }

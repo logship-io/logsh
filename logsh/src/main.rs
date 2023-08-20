@@ -7,7 +7,7 @@ struct Args {
     #[command(subcommand)]
     command: Option<Commands>,
 
-    #[arg(long, short = 'v', action = clap::ArgAction::Count, global = true)]
+    #[arg(short = 'v', action = clap::ArgAction::Count, global = true, help = "Set command verbosity. The more 'v's, the more verbose. -vvvv is the most verbose.")]
     verbose: u8,
 }
 
@@ -15,6 +15,7 @@ struct Args {
 enum Commands {
     #[command(subcommand)]
     Connection(logsh::connect::ConnectCommand),
+    Query(logsh::query::QueryCommand),
 }
 
 fn main() {
@@ -32,6 +33,9 @@ fn main() {
     match cli.command {
         Some(Commands::Connection(command)) => {
             connect::execute_connect(command).unwrap();
+        }
+        Some(Commands::Query(command)) => {
+            logsh::query::execute_query(command).unwrap();
         }
         None => println!("No subcommand was used. Try --help."),
     }
