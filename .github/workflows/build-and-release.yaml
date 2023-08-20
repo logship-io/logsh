@@ -21,8 +21,10 @@ jobs:
         run: |
           sudo apt-get install -y sed
           export GIT_VERSION=${GITHUB_REF#refs/*/v}
-          echo ${GITHUB_REF#refs/*/v}
-          sed -i "s/^\(version[[:space:]]\{1,\}=[[:space:]]\{1,\}\)\"\([0-9]\{1,\}\.\)\{1,\}\([0-9]\)\{1,\}\"/version = \"$GIT_VERSION\"/" ./logsh/Cargo.toml
+          export SEARCH_PAT="s/^\(version[[:space:]]\{1,\}=[[:space:]]\{1,\}\)\"\([0-9]\{1,\}\.\)\{1,\}\([0-9]\)\{1,\}\"/version = \"$GIT_VERSION\"/"
+          sed -i $SEARCH_PAT ./logsh/Cargo.toml
+          echo "Version should be ${GITHUB_REF#refs/*/v}"
+          echo "----------------------------------------"
           cat ./logsh/Cargo.toml
 
       - uses: actions-rs/toolchain@v1
