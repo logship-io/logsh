@@ -28,7 +28,9 @@ jobs:
         uses: actions/upload-artifact@v2
         with:
           name: logsh-cli
-          path: logsh/target/release/${{ env.PROJECT_NAME_UNDERSCORE }}*
+          path: |
+            logsh/target/release/${{ env.PROJECT_NAME_UNDERSCORE }}
+            logsh/target/release/${{ env.PROJECT_NAME_UNDERSCORE }}.exe
   upload:
     name: Create release and upload
     needs: build
