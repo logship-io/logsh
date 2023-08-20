@@ -21,12 +21,12 @@ jobs:
           profile: minimal
           toolchain: stable
           override: true
-      - name: Debug Build
-        run: ls
       - name: Release Build
         run: cargo build --release
+        working-directory: ./logsh
       - name: 'Upload Artifact'
         uses: actions/upload-artifact@v2
+        working-directory: ./logsh
         with:
           name: ${{ env.PROJECT_NAME_UNDERSCORE }}
           path: target/release/${{ env.PROJECT_NAME_UNDERSCORE }}
