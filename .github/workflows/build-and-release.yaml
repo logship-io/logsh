@@ -6,7 +6,7 @@ on:
 name: Logsh CLI Build and Publish
 
 jobs:
-  release:
+  build:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
@@ -27,5 +27,36 @@ jobs:
       - name: 'Upload Artifact'
         uses: actions/upload-artifact@v2
         with:
-          name: ${{ env.PROJECT_NAME_UNDERSCORE }}
-          path: logsh/target/release/${{ env.PROJECT_NAME_UNDERSCORE }}
+          name: logsh-cli
+          path: logsh/target/release/${{ env.PROJECT_NAME_UNDERSCORE }}*
+  upload:
+    name: Create release and upload
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@v2
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          draft: false
+          prerelease: false
+      - name: Downloading artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: logsh-cli
+      - name: Upload Artifact
+        id: upload-release-asset
+        uses: softprops/action-gh-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.build.outputs.upload_url }}
+          asset_path: logsh/target/release/
+          asset_name: logsh*
+          asset_content_type: application/x-executable
