@@ -75,8 +75,6 @@ pub fn execute_query(command: QueryCommand) -> Result<(), Box<dyn Error>> {
     trace!("Response text: {:?}", full_text);
 
     let result: QueryResult = serde_json::from_str(&full_text)?;
-    println!("{:?}", result);
-
     let mut table = Table::new();
 
     table.add_row(Row::new(
