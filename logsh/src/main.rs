@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use logsh::{connect, error::CliError};
 
 #[derive(Parser, Debug)]
-#[clap(name = "logsh", version = "0.1.0", author = "logship.llc")]
+#[clap(name = "logsh", author = "logship.llc")]
 struct Args {
     #[command(subcommand)]
     command: Option<Commands>,
