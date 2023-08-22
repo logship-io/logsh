@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use logsh::connect;
+use logsh::{connect, error::CliError};
 
 #[derive(Parser, Debug)]
 #[clap(name = "logsh", version = "0.1.0", author = "logship.llc")]
@@ -30,13 +30,19 @@ fn main() {
     };
 
     logsh::logger::install(log_level.to_level().unwrap());
-    match cli.command {
-        Some(Commands::Connection(command)) => {
-            connect::execute_connect(command).unwrap();
+    let result = match cli.command {
+        Some(Commands::Connection(command)) => connect::execute_connect(command),
+        Some(Commands::Query(command)) => logsh::query::execute_query(command),
+        None => Err(CliError {
+            message: "No command provided.".to_owned(),
+            code: 1,
+        }),
+    };
+    match result {
+        Ok(_) => {}
+        Err(e) => {
+            eprintln!("{}", e);
+            std::process::exit(e.code);
         }
-        Some(Commands::Query(command)) => {
-            logsh::query::execute_query(command).unwrap();
-        }
-        None => println!("No subcommand was used. Try --help."),
     }
 }

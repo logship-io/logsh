@@ -1,4 +1,4 @@
-use std::{collections::HashMap, error::Error, io::Read};
+use std::{collections::HashMap, io::Read};
 
 use log::{error, trace};
 use serde_json::value::RawValue;
@@ -8,7 +8,7 @@ use term_table::{
     Table,
 };
 
-use crate::config;
+use crate::{config, error::CliError};
 
 #[derive(Debug, clap::Args)]
 #[clap(about = "Execute a query against a logship server.")]
@@ -36,15 +36,19 @@ struct QueryResult<'a> {
     results: Vec<HashMap<&'a str, &'a RawValue>>,
 }
 
-pub fn execute_query(command: QueryCommand) -> Result<(), Box<dyn Error>> {
-    let connection = config::get_default_connection()
-        .expect("No default connection info found. Please try adding a connection");
+pub fn execute_query(command: QueryCommand) -> Result<(), CliError> {
+    let connection = config::get_default_connection()?;
 
     let mut query_string = std::string::String::new();
     match command.query {
         Some(query) => query_string = query,
         None => {
-            std::io::stdin().read_to_string(&mut query_string)?;
+            std::io::stdin()
+                .read_to_string(&mut query_string)
+                .map_err(|e| CliError {
+                    message: format!("Unable to read query from stdin: {}", e),
+                    code: 1,
+                })?;
         }
     };
 
@@ -57,24 +61,33 @@ pub fn execute_query(command: QueryCommand) -> Result<(), Box<dyn Error>> {
         .json(&map)
         .header("Authorization", "Bearer ".to_owned() + &connection.token)
         .send()
-        .unwrap();
+        .map_err(|e| CliError {
+            message: format!("Unable to connect to server: {}", e),
+            code: 1,
+        })?;
 
     trace!("Response: {:?}", res);
-
-    if res.status() != 200 {
-        error!("Status {}: Error: {}", res.status(), res.text()?);
+    let status = res.status();
+    let result_text = res.text().map_err(|e| CliError {
+        message: format!("Unable to read response: {}", e),
+        code: 1,
+    })?;
+    if status != 200 {
+        error!("Status {}: Error: {}", status, result_text);
         return Ok(());
     }
 
-    let full_text = res.text()?;
     if command.json {
-        println!("{}", full_text);
+        println!("{}", result_text);
         return Ok(());
     }
 
-    trace!("Response text: {:?}", full_text);
+    trace!("Response text: {:?}", result_text);
 
-    let result: QueryResult = serde_json::from_str(&full_text)?;
+    let result: QueryResult = serde_json::from_str(&result_text).map_err(|e| CliError {
+        message: format!("Unable to parse response: {}", e),
+        code: 1,
+    })?;
     let mut table = Table::new();
 
     table.add_row(Row::new(
