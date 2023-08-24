@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io::Read};
+use std::{collections::{HashMap, BTreeMap}, io::{Read, self}, str::FromStr};
 
 use log::{error, trace};
 use serde_json::value::RawValue;
@@ -22,6 +22,9 @@ pub struct QueryCommand {
 
     #[arg(long, help = "Output results as JSON.")]
     json: bool,
+
+    #[arg(long, help = "Output results as CSV.")]
+    csv: bool,
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -78,6 +81,10 @@ pub fn execute_query(command: QueryCommand) -> Result<(), CliError> {
     }
 
     if command.json {
+        if command.csv {
+            log::warn!("Args --json and --csv both specified, defaulting to json.");
+        }
+
         println!("{}", result_text);
         return Ok(());
     }
@@ -88,6 +95,44 @@ pub fn execute_query(command: QueryCommand) -> Result<(), CliError> {
         message: format!("Unable to parse response: {}", e),
         code: 1,
     })?;
+
+    if command.csv {
+        let mut wtr = csv::Writer::from_writer(io::stdout());
+
+        // write headers
+        wtr.write_record(&result.header)?;
+
+        let map = BTreeMap::<&str, usize>::from_iter(result.header
+            .iter()
+            .enumerate()
+            .map(|tup| (tup.1.as_ref(), tup.0)));
+        
+        for r in result.results.iter() {
+            let mut arr = vec![String::default(); result.header.len()];
+            for (k, v) in r.iter() {
+                let i = map.get(k)
+                    .copied()
+                    .unwrap_or_else(|| {
+                    log::error!("Invalid query result. Field \"{k}\" not in headers");
+                    0
+                });
+                
+                arr[i] = v.to_string();
+            }
+            wtr.write_record(arr)?;
+        }
+
+        // A CSV writer maintains an internal buffer, so it's important
+        // to flush the buffer when you're done.
+        if let Err(err) = wtr.flush() {
+            return Err(CliError {
+                message: format!("Failed to write to STDOUT: {err}"),
+                code: 2,
+            });
+        }
+        return Ok(());
+    }
+
     let mut table = Table::new();
 
     table.add_row(Row::new(
@@ -96,11 +141,24 @@ pub fn execute_query(command: QueryCommand) -> Result<(), CliError> {
             .iter()
             .map(|f| TableCell::new_with_alignment(f, 1, Alignment::Center)),
     ));
-    result.results.iter().for_each(|f| {
-        table.add_row(Row::new(result.header.iter().map(|h| {
-            TableCell::new_with_alignment(f[h as &str].get(), 1, Alignment::Center)
-        })));
-    });
+
+    result.results.iter().map(|field| {
+        let cells = result.header.iter().map(|header| match header.as_str() {
+            "json" => {
+                let json = field[header.as_str()].get();
+                if let Ok(json) =
+                    serde_json::Value::from_str(json).and_then(|j| serde_json::to_string_pretty(&j))
+                {
+                    TableCell::new_with_alignment(json, 1, Alignment::Center)
+                } else {
+                    TableCell::new_with_alignment(json, 1, Alignment::Center)
+                }
+            }
+            _ => TableCell::new_with_alignment(field[header.as_str()].get(), 1, Alignment::Center),
+        });
+
+        Row::new(cells)
+    }).for_each(|row| table.add_row(row));
 
     println!("{}", table.render());
     Ok(())
