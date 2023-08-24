@@ -29,7 +29,11 @@ fn main() {
         _ => log::LevelFilter::Trace,
     };
 
-    logsh::logger::install(log_level.to_level().unwrap());
+    pretty_env_logger::formatted_builder()
+        .filter_level(log_level)
+        .init();
+
+    //logsh::logger::install(log_level.to_level().unwrap());
     let result = match cli.command {
         Some(Commands::Connection(command)) => connect::execute_connect(command),
         Some(Commands::Query(command)) => logsh::query::execute_query(command),
