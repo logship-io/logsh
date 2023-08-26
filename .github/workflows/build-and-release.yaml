@@ -16,6 +16,15 @@ jobs:
       PROJECT_NAME_UNDERSCORE: logsh
     steps:
       - uses: actions/checkout@v2
+
+      - name: Inject Tag Version
+        run: |
+          sudo apt-get install -y sed
+          export GIT_VERSION=${GITHUB_REF#refs/*/v}
+          echo ${GITHUB_REF#refs/*/v}
+          sed -i "s/^\(version[[:space:]]\{1,\}=[[:space:]]\{1,\}\)\"\([0-9]\{1,\}\.\)\{1,\}\([0-9]\)\{1,\}\"/version = \"$GIT_VERSION\"/" ./logsh/Cargo.toml
+          cat ./logsh/Cargo.toml
+
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal

@@ -1,5 +1,10 @@
-use clap::{Parser, Subcommand};
-use logsh::{connect, error::CliError};
+use std::str::FromStr;
+
+use anyhow::{anyhow, Error};
+use clap::{arg, Parser, Subcommand, ValueEnum};
+mod connect;
+mod query;
+mod version;
 
 #[derive(Parser, Debug)]
 #[clap(name = "logsh", author = "logship.llc")]
@@ -9,18 +14,20 @@ struct Args {
 
     #[arg(short = 'v', action = clap::ArgAction::Count, global = true, help = "Set command verbosity. The more 'v's, the more verbose. -vvvv is the most verbose.")]
     verbose: u8,
+
+    #[arg(long, help = "logsh version information.")]
+    version: bool,
 }
 
 #[derive(Subcommand, Debug)]
 enum Commands {
     #[command(subcommand)]
-    Connection(logsh::connect::ConnectCommand),
-    Query(logsh::query::QueryCommand),
+    Connection(crate::connect::ConnectCommand),
+    Query(crate::query::QueryCommand),
 }
 
-fn main() {
+fn main() -> Result<(), Error> {
     let cli = Args::parse();
-
     let log_level = match cli.verbose {
         0 => log::LevelFilter::Error,
         1 => log::LevelFilter::Warn,
@@ -33,20 +40,41 @@ fn main() {
         .filter_level(log_level)
         .init();
 
-    //logsh::logger::install(log_level.to_level().unwrap());
+    if cli.version {
+        return version::version(std::io::stdout(), log_level);
+    }
+
     let result = match cli.command {
-        Some(Commands::Connection(command)) => connect::execute_connect(command),
-        Some(Commands::Query(command)) => logsh::query::execute_query(command),
-        None => Err(CliError {
-            message: "No command provided.".to_owned(),
-            code: 1,
-        }),
+        Some(Commands::Connection(command)) => crate::connect::execute_connect(command),
+        Some(Commands::Query(command)) => crate::query::execute_query(command, std::io::stdout()),
+        None => Err(anyhow::anyhow!("No command provided.")),
     };
-    match result {
-        Ok(_) => {}
-        Err(e) => {
-            eprintln!("{}", e);
-            std::process::exit(e.code);
+
+    if let Err(err) = result {
+        return Err(anyhow!("Command failed: {}", err));
+    }
+
+    Ok(())
+}
+
+#[derive(Copy, Clone, Debug, Default, ValueEnum)]
+pub enum OutputMode {
+    #[default]
+    Table,
+    Json,
+    JsonPretty,
+    Csv,
+}
+
+impl FromStr for OutputMode {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "json" => Ok(OutputMode::Json),
+            "json-pretty" => Ok(OutputMode::JsonPretty),
+            "csv" => Ok(OutputMode::Csv),
+            _ => Err(anyhow!("Failed to read output format: \"{}\"", s)),
         }
     }
 }

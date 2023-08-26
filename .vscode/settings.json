@@ -1,0 +1,7 @@
+{
+    "rust-analyzer.linkedProjects": [
+        ".\\logsh\\Cargo.toml",
+        ".\\logsh\\Cargo.toml"
+    ],
+    "rust-analyzer.cargo.loadOutDirsFromCheck": true
+}

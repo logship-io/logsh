@@ -1,20 +1,14 @@
-use clap::{arg, Subcommand};
-use log::debug;
-use serde::Deserialize;
-use std::collections::HashMap;
+use anyhow::{anyhow, Error};
+use clap::Subcommand;
+use logsh_core::query::QueryResultFmt;
+use std::{collections::HashMap, io::Write};
 use term_table::{
     row::Row,
     table_cell::{Alignment, TableCell},
     Table,
 };
-use uuid::Uuid;
 
-use crate::{config, error::CliError};
-
-#[derive(Deserialize)]
-struct TokenResponse {
-    token: String,
-}
+use crate::OutputMode;
 
 #[derive(Subcommand, Debug)]
 #[clap(about = "Connect to a Logship server.")]
@@ -32,10 +26,13 @@ pub enum ConnectCommand {
         user: String,
 
         #[arg(short, long, help = "Password to authenticate with.")]
-        password: String,
+        password: Option<String>,
     },
     #[clap(about = "List existing connections.")]
-    List {},
+    List {
+        #[arg(short, long, help = "Output result format")]
+        output: Option<OutputMode>,
+    },
     #[clap(about = "Modify the currently defaulted connection.")]
     Default {
         #[arg(help = "Name of the connection to set as default.")]
@@ -43,7 +40,7 @@ pub enum ConnectCommand {
     },
 }
 
-pub fn execute_connect(command: ConnectCommand) -> Result<(), CliError> {
+pub fn execute_connect(command: ConnectCommand) -> Result<(), Error> {
     match command {
         ConnectCommand::Add {
             name,
@@ -52,130 +49,102 @@ pub fn execute_connect(command: ConnectCommand) -> Result<(), CliError> {
             user,
             password,
         } => connect(name, server, default, user, password),
-        ConnectCommand::List {} => list(),
+        ConnectCommand::List { output } => list(std::io::stdout(), output),
         ConnectCommand::Default { name } => set_default(name),
     }
 }
 
-fn fetch_token(server: String, user: String, password: String) -> Result<String, CliError> {
-    let mut map = HashMap::new();
-    map.insert("username", user);
-    map.insert("password", password);
-
-    let client = reqwest::blocking::Client::new();
-    let res = client
-        .post(server + "/auth/token")
-        .json(&map)
-        .send()
-        .map_err(|e| CliError {
-            message: format!("Unable to connect to server: {}", e),
-            code: 1,
-        })?;
-
-    let token: TokenResponse = res.json().map_err(|e| CliError {
-        message: format!("Unable to parse token response: {}", e),
-        code: 1,
-    })?;
-    Ok(token.token)
-}
-
-pub fn set_default(name: String) -> Result<(), CliError> {
-    let mut existing_config = config::get_configuration().map_err(|e| CliError {
-        message: format!("Unable to read configuration: {}", e),
-        code: 1,
-    })?;
-    existing_config
-        .connections
-        .iter_mut()
-        .for_each(|c| c.default = false);
-
-    let connection = existing_config
-        .connections
-        .iter_mut()
-        .find(|c| c.name == name);
-    match connection {
-        Some(connection) => {
-            connection.default = true;
-        }
-        None => {
-            return Err(CliError {
-                message: format!("No connection found with name {}", name),
-                code: 1,
-            });
-        }
-    }
-
-    config::save_configuration(existing_config).map_err(|e| CliError {
-        message: format!("Unable to save configuration: {}", e),
-        code: 1,
-    })
-}
-
-pub fn list() -> Result<(), CliError> {
-    let existing_config = config::get_configuration().map_err(|e| CliError {
-        message: format!("Unable to read configuration: {}", e),
-        code: 1,
-    })?;
-    let mut table = Table::new();
-    table.add_row(Row::new(vec![
-        TableCell::new_with_alignment("Name", 1, Alignment::Center),
-        TableCell::new_with_alignment("Server", 1, Alignment::Center),
-        TableCell::new_with_alignment("Default", 1, Alignment::Center),
-    ]));
-    existing_config.connections.iter().for_each(|f| {
-        table.add_row(Row::new(vec![
-            TableCell::new_with_alignment(&f.name, 1, Alignment::Center),
-            TableCell::new_with_alignment(&f.server, 1, Alignment::Center),
-            TableCell::new_with_alignment(&f.default.to_string(), 1, Alignment::Center),
-        ]));
-    });
-
-    println!("{}", table.render());
-    Ok(())
-}
-
-pub fn connect(
+fn connect(
     name: String,
     server: String,
     default: bool,
     user: String,
-    password: String,
-) -> Result<(), CliError> {
-    debug!("Connecting to {} at {}", name, server);
-
-    let mut existing_config = config::get_configuration()?;
-    let should_default = default || existing_config.connections.is_empty();
-    if should_default {
-        existing_config
-            .connections
-            .iter_mut()
-            .for_each(|c| c.default = false);
-    }
-
-    let token = fetch_token(server.clone(), user, password)?;
-    debug!("Successfully received token");
-
-    let existing_connection = existing_config
-        .connections
-        .iter_mut()
-        .find(|c| c.name == name);
-    match existing_connection {
-        Some(connection) => {
-            connection.server = server;
-            connection.default = should_default;
-            connection.token = token;
+    password: Option<String>,
+) -> Result<(), Error> {
+    logsh_core::connect::connect(name, server, default, user, || {
+        if let Some(password) = password {
+            return Ok(password);
         }
-        None => {
-            existing_config.connections.push(config::ConnectionInfo {
-                name,
-                server,
-                default: should_default,
-                token,
-                default_acccount_id: Uuid::nil().to_string(),
+
+        rpassword::prompt_password("Enter logship password: ")
+    })
+    .map_err(|e| anyhow!("Failed to connect: {}", e))
+}
+
+fn list<W: Write>(mut write: W, mode: Option<OutputMode>) -> Result<(), Error> {
+    let config = logsh_core::config::get_configuration()?;
+    match mode.unwrap_or_default() {
+        OutputMode::Table => {
+            let mut table = Table::new();
+            table.add_row(Row::new(vec![
+                TableCell::new_with_alignment("Name", 1, Alignment::Center),
+                TableCell::new_with_alignment("Server", 1, Alignment::Center),
+                TableCell::new_with_alignment("Default", 1, Alignment::Center),
+            ]));
+
+            config.connections.iter().for_each(|f| {
+                table.add_row(Row::new(vec![
+                    TableCell::new_with_alignment(&f.name, 1, Alignment::Center),
+                    TableCell::new_with_alignment(&f.server, 1, Alignment::Center),
+                    TableCell::new_with_alignment(&f.default.to_string(), 1, Alignment::Center),
+                ]));
             });
+
+            log::trace!("Rendering output table.");
+            let render = table.render();
+            writeln!(write, "{}", render).map_err(|e| anyhow!("Failed to write output: {}", e))
+        }
+        OutputMode::Json => {
+            let json = serde_json::to_string(&config)?;
+            writeln!(write, "{}", json).map_err(|e| anyhow!("Failed to write json output: {}", e))
+        }
+        OutputMode::JsonPretty => {
+            let json = serde_json::to_string_pretty(&config)?;
+            writeln!(write, "{}", json)
+                .map_err(|e| anyhow!("Failed to write pretty json output: {}", e))
+        }
+        OutputMode::Csv => {
+            let results = config
+                .connections
+                .iter()
+                .map(|c| {
+                    HashMap::from([
+                        (
+                            "Name".to_string(),
+                            serde_json::Value::String(c.name.to_string()),
+                        ),
+                        (
+                            "Server".to_string(),
+                            serde_json::Value::String(c.server.to_string()),
+                        ),
+                        (
+                            "Default".to_string(),
+                            serde_json::Value::String(c.default.to_string()),
+                        ),
+                    ])
+                })
+                .collect();
+            let result = QueryResultFmt {
+                header: vec![
+                    "Name".to_string(),
+                    "Server".to_string(),
+                    "Default".to_string(),
+                ],
+                results,
+            };
+            let result = serde_json::to_string(&result).map_err(|e| {
+                anyhow::anyhow!("Error converting connections to query response json: {}", e)
+            })?;
+            let query = result
+                .as_str()
+                .try_into()
+                .map_err(|e| anyhow::anyhow!("Error converting connection json to csv: {}", e))?;
+            logsh_core::csv::write_csv(&query, write)
+                .map_err(|e| anyhow!("Failed to write csv output: {}", e))
         }
     }
+}
 
-    config::save_configuration(existing_config)?;
-    Ok(())
+fn set_default(name: String) -> Result<(), Error> {
+    logsh_core::connect::set_default(name).map_err(|e| anyhow!("Failed to set default: {}", e))
 }
