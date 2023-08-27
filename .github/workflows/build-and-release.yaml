@@ -18,6 +18,7 @@ jobs:
       - uses: actions/checkout@v2
 
       - name: Inject Tag Version
+        if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
         run: |
           $Env:GIT_VERSION = $Env:GITHUB_REF -replace 'refs/.*/v', ''
