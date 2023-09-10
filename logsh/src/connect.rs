@@ -5,10 +5,10 @@ use std::{collections::HashMap, io::Write};
 use term_table::{
     row::Row,
     table_cell::{Alignment, TableCell},
-    Table,
+    Table, TableStyle,
 };
 
-use crate::OutputMode;
+use crate::{OutputMode, query::markdown_style};
 
 #[derive(Subcommand, Debug)]
 #[clap(about = "Connect to a Logship server.")]
@@ -74,8 +74,13 @@ fn connect(
 fn list<W: Write>(mut write: W, mode: Option<OutputMode>) -> Result<(), Error> {
     let config = logsh_core::config::get_configuration()?;
     match mode.unwrap_or_default() {
-        OutputMode::Table => {
+        OutputMode::Table | OutputMode::Markdown => {
             let mut table = Table::new();
+            table.style = match mode.unwrap_or_default() {
+                OutputMode::Table => TableStyle::thin(),
+                OutputMode::Markdown => markdown_style(),
+                _ => unreachable!(),
+            };
             table.add_row(Row::new(vec![
                 TableCell::new_with_alignment("Name", 1, Alignment::Center),
                 TableCell::new_with_alignment("Server", 1, Alignment::Center),

@@ -9,10 +9,22 @@ use clap::arg;
 use term_table::{
     row::Row,
     table_cell::{Alignment, TableCell},
-    Table,
+    Table, TableStyle,
 };
 
 use crate::OutputMode;
+
+pub fn markdown_style() -> TableStyle {
+    let mut style: TableStyle = TableStyle::simple();
+    style.top_left_corner = '│';
+    style.top_right_corner = '│';
+    style.bottom_left_corner = '│';
+    style.bottom_right_corner = '│';
+    style.outer_right_vertical = '|';
+    style.outer_left_vertical = '|';
+    style.vertical = '|';
+    style
+}
 
 #[derive(Debug, clap::Args)]
 #[clap(about = "Execute a query against a logship server.")]
@@ -54,7 +66,17 @@ pub fn execute_query<W: Write>(command: QueryCommand, mut write: W) -> Result<()
     match command.output.unwrap_or_default() {
         OutputMode::Table => {
             log::trace!("Outputting table");
-            render_table(result, write)
+            render_table(result,
+                TableStyle::thin(),
+                false,
+                write)
+        }
+        OutputMode::Markdown => {
+            log::trace!("Outputting markdown table");
+            render_table(result,
+                markdown_style(),
+                true,
+                write)
         }
         OutputMode::Json => {
             log::trace!("Outputting unformatted JSON");
@@ -95,16 +117,23 @@ pub fn execute_query<W: Write>(command: QueryCommand, mut write: W) -> Result<()
 
 fn render_table<W: Write>(
     result: logsh_core::query::QueryResult<'_>,
+    style: TableStyle,
+    is_markdown : bool,
     mut write: W,
 ) -> Result<(), Error> {
     let mut table = Table::new();
-    table.add_row(Row::new(
+    table.style = style;
+    table.has_bottom_boarder = !is_markdown;
+    let mut header_row = Row::new(
         result
             .header
             .iter()
             .map(|f| TableCell::new_with_alignment(f, 1, Alignment::Center)),
-    ));
+    );
+    header_row.has_separator = !is_markdown;
+    table.add_row(header_row);
 
+    let mut is_first = true;
     for row in result.results {
         let cells = result.header.iter().map(|header| match header.as_str() {
             "json" => {
@@ -121,7 +150,11 @@ fn render_table<W: Write>(
             _ => TableCell::new_with_alignment(row[header.as_str()].get(), 1, Alignment::Center),
         });
 
-        table.add_row(Row::new(cells));
+        let mut row = Row::new(cells);
+        row.has_separator = !is_markdown || is_first;
+        table.add_row(row);
+
+        is_first = false;
     }
 
     log::trace!("Render table.");

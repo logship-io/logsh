@@ -64,6 +64,7 @@ pub enum OutputMode {
     Json,
     JsonPretty,
     Csv,
+    Markdown,
 }
 
 impl FromStr for OutputMode {
@@ -74,6 +75,7 @@ impl FromStr for OutputMode {
             "json" => Ok(OutputMode::Json),
             "json-pretty" => Ok(OutputMode::JsonPretty),
             "csv" => Ok(OutputMode::Csv),
+            "markdown" => Ok(OutputMode::Markdown),
             _ => Err(anyhow!("Failed to read output format: \"{}\"", s)),
         }
     }
