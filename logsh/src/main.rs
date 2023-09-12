@@ -4,6 +4,7 @@ use anyhow::{anyhow, Error};
 use clap::{arg, Parser, Subcommand, ValueEnum};
 mod connect;
 mod query;
+mod upload;
 mod version;
 
 #[derive(Parser, Debug)]
@@ -24,6 +25,7 @@ enum Commands {
     #[command(subcommand)]
     Connection(crate::connect::ConnectCommand),
     Query(crate::query::QueryCommand),
+    Upload(crate::upload::UploadCommand),
 }
 
 fn main() -> Result<(), Error> {
@@ -47,6 +49,7 @@ fn main() -> Result<(), Error> {
     let result = match cli.command {
         Some(Commands::Connection(command)) => crate::connect::execute_connect(command),
         Some(Commands::Query(command)) => crate::query::execute_query(command, std::io::stdout()),
+        Some(Commands::Upload(command)) => crate::upload::execute_upload(command),
         None => Err(anyhow::anyhow!("No command provided.")),
     };
 

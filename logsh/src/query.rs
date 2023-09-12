@@ -22,6 +22,7 @@ pub fn markdown_style() -> TableStyle {
     style.bottom_right_corner = '│';
     style.outer_right_vertical = '|';
     style.outer_left_vertical = '|';
+    style.intersection = '|';
     style.vertical = '|';
     style
 }
@@ -66,17 +67,11 @@ pub fn execute_query<W: Write>(command: QueryCommand, mut write: W) -> Result<()
     match command.output.unwrap_or_default() {
         OutputMode::Table => {
             log::trace!("Outputting table");
-            render_table(result,
-                TableStyle::thin(),
-                false,
-                write)
+            render_table(result, TableStyle::thin(), false, write)
         }
         OutputMode::Markdown => {
             log::trace!("Outputting markdown table");
-            render_table(result,
-                markdown_style(),
-                true,
-                write)
+            render_table(result, markdown_style(), true, write)
         }
         OutputMode::Json => {
             log::trace!("Outputting unformatted JSON");
@@ -118,7 +113,7 @@ pub fn execute_query<W: Write>(command: QueryCommand, mut write: W) -> Result<()
 fn render_table<W: Write>(
     result: logsh_core::query::QueryResult<'_>,
     style: TableStyle,
-    is_markdown : bool,
+    is_markdown: bool,
     mut write: W,
 ) -> Result<(), Error> {
     let mut table = Table::new();

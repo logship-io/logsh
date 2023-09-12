@@ -8,7 +8,7 @@ use term_table::{
     Table, TableStyle,
 };
 
-use crate::{OutputMode, query::markdown_style};
+use crate::{query::markdown_style, OutputMode};
 
 #[derive(Subcommand, Debug)]
 #[clap(about = "Connect to a Logship server.")]

@@ -30,6 +30,19 @@ pub enum CliError {
     QueryError(QueryError),
 }
 
+
+#[derive(Debug, Error)]
+pub enum CommonError {
+    #[error("File not found: {0}")]
+    FileNotFound(std::string::String),
+
+    #[error("Argument {0} is empty")]
+    EmptyArgument(std::string::String),
+
+    #[error("End of file")]
+    EndOfFile(),
+}
+
 #[derive(Debug, Error)]
 pub enum ConfigError {
     #[error("Unable to determine home directory")]
@@ -73,4 +86,23 @@ pub enum QueryError {
 
     #[error("HTTP {0} | {1}")]
     HttpErrorStatus(reqwest::StatusCode, String),
+}
+
+#[derive(Debug, Error)]
+pub enum UploadError {
+    #[error("{0}")]
+    Common(CommonError),
+    #[error("{0}")]
+    Config(ConfigError),
+    #[error("Unsupported file extension: {0}")]
+    UnsupportedFileExtension(String),
+    #[error("Failed to read file: {0}")]
+    FailedToReadFile(std::io::Error),
+    #[error("Failed to read file: {0}")]
+    FailedToReadFileContent(serde_json::Error),
+
+    #[error("Failed to upload: {0}")]
+    UploadFailure(reqwest::Error),
+    #[error("Failed to upload, status: {0}, message: {1}")]
+    UploadFailureStatus(i32, String),
 }
