@@ -19,7 +19,7 @@ pub fn version<W: Write>(mut write: W, level: log::LevelFilter) -> Result<(), Er
                 welcome.push_str(CONTAINERS[row]);
             }
             welcome.push_str(END_SHIP[row]);
-            welcome.push_str("\n");
+            welcome.push('\n');
         }
     }
 
@@ -41,7 +41,7 @@ pub fn version<W: Write>(mut write: W, level: log::LevelFilter) -> Result<(), Er
     .map_err(|e| anyhow!("Failed to write version: {}", e))
 }
 
-const LOGSHIP: &'static str = r"    __                     __     _      
+const LOGSHIP: &str = r"    __                     __     _      
    / /____   ____ _ _____ / /_   (_)____ 
   / // __ \ / __ `// ___// __ \ / // __ \
  / // /_/ // /_/ /(__  )/ / / // // /_/ /

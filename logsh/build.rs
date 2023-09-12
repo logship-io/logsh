@@ -25,8 +25,7 @@ fn write_build_info<P: AsRef<Path>>(path: P, table: Table) -> Result<(), Error> 
     let mut s = String::new();
     let package = table
         .get("package")
-        .map(|t| t.as_table())
-        .flatten()
+        .and_then(|t| t.as_table())
         .ok_or_else(|| anyhow!("Failed to read [package] table in cargo.toml"))?;
     for (k, v) in package {
         write_string(&mut s, k, &v.to_string())
@@ -41,13 +40,13 @@ fn write_string(s: &mut String, key: &'_ str, value: &'_ str) {
     let value = value
         .trim_start_matches('"')
         .trim_end_matches('"')
-        .replace("\"", "\\\"");
+        .replace('\"', "\\\"");
     let upper = key.to_ascii_uppercase();
     s.push_str(&format!(
         concat!(
             "/// Generated accessor for package.{} from Cargo.toml\n",
             "#[allow(dead_code)]\n",
-            "pub const {}: &'static str = \"{}\";\n"
+            "pub const {}: &str = \"{}\";\n"
         ),
         key, upper, value
     ));
