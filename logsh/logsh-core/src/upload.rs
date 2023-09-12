@@ -2,7 +2,7 @@ use std::{path::Path, collections::HashMap, fs::File, io::{prelude::*, BufReader
 
 use log::{debug, trace, info, warn};
 use reqwest::blocking::Client;
-use serde_json::Value;
+use serde_json::{Value, Number};
 use chrono;
 use crate::{config::{self, ConnectionInfo}, error::{CommonError, UploadError}};
 
@@ -32,6 +32,9 @@ struct TsvFileReader {
     header: Vec<String>,
     schema: String,
     now : String,
+
+    first: bool,
+    converters: Vec<fn(&str) -> Value>,
 }
 
 impl TsvFileReader{
@@ -51,6 +54,8 @@ impl TsvFileReader{
             header,
             schema,
             now: format!("{:?}", now),
+            first: true,
+            converters: Vec::new(),
         };
         return result;
     }
@@ -66,10 +71,26 @@ impl FileReader for TsvFileReader {
                 }
                 trace!("Read line: {}", buffer[..size].trim());
                 let mut data = HashMap::new();
-                for item in self.header.iter().zip(
-                    buffer[..size].trim().split("\t")) {
+
+                if self.first {
+                    self.first = false;
+                    buffer[..size].trim().split("\t").for_each(|f| {
+                        if f.parse::<bool>().is_ok() {
+                            self.converters.push(|s| s.parse::<bool>().and_then(|op| Ok(Value::Bool(op))).unwrap_or_else(|_| Value::Null));
+                        } else if f.parse::<i64>().is_ok() {
+                            self.converters.push(|s| s.parse::<i64>().and_then(|op| Ok(Value::Number(op.into()))).unwrap_or_else(|_| Value::Null));
+                        } else if f.parse::<f64>().is_ok() {
+                            self.converters.push(|s| s.parse::<f64>().and_then(|op| Ok(Value::Number(Number::from_f64(op).unwrap()))).unwrap_or_else(|_| Value::Null));
+                        } else {
+                            self.converters.push(|s| Value::String(s.to_string()));
+                        }
+                    });
+                }
+
+                for item in self.header.iter().zip(self.converters.iter().zip(
+                    buffer[..size].trim().split("\t"))) {
                     trace!("Adding item: {:?}", item);
-                    data.insert(item.0.to_owned(), Value::String(item.1.trim().to_string()));
+                    data.insert(item.0.to_owned(), item.1.0(item.1.1));
                 }
 
                 let record = Record {
