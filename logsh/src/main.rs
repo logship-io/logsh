@@ -15,9 +15,6 @@ struct Args {
 
     #[arg(short = 'v', action = clap::ArgAction::Count, global = true, help = "Set command verbosity. The more 'v's, the more verbose. -vvvv is the most verbose.")]
     verbose: u8,
-
-    #[arg(long, help = "logsh version information.")]
-    version: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -26,6 +23,7 @@ enum Commands {
     Connection(crate::connect::ConnectCommand),
     Query(crate::query::QueryCommand),
     Upload(crate::upload::UploadCommand),
+    Version(crate::version::VersionCommand),
 }
 
 fn main() -> Result<(), Error> {
@@ -42,14 +40,13 @@ fn main() -> Result<(), Error> {
         .filter_level(log_level)
         .init();
 
-    if cli.version {
-        return version::version(std::io::stdout(), log_level);
-    }
-
     let result = match cli.command {
         Some(Commands::Connection(command)) => crate::connect::execute_connect(command),
         Some(Commands::Query(command)) => crate::query::execute_query(command, std::io::stdout()),
         Some(Commands::Upload(command)) => crate::upload::execute_upload(command),
+        Some(Commands::Version(command)) => {
+            crate::version::version(std::io::stdout(), command, log_level)
+        }
         None => Err(anyhow::anyhow!("No command provided.")),
     };
 

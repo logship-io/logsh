@@ -1,23 +1,107 @@
+use oauth2::TokenResponse;
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
     path::{Path, PathBuf},
 };
 
-use crate::error::ConfigError;
+use crate::{connect::OAuthToken, error::ConfigError};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct ConnectionInfo {
-    pub name: String,
-    pub server: String,
-    pub token: String,
-    pub default: bool,
-    pub default_acccount_id: String,
+pub enum Connection {
+    Jwt {
+        name: String,
+        server: String,
+        token: String,
+        default: bool,
+        default_acccount_id: String,
+    },
+    OAuth {
+        name: String,
+        server: String,
+        token: OAuthToken,
+        default: bool,
+        default_acccount_id: String,
+    },
+}
+
+impl Connection {
+    pub fn is_default(&self) -> bool {
+        match self {
+            Connection::Jwt { default, .. } => *default,
+            Connection::OAuth { default, .. } => *default,
+        }
+    }
+
+    pub fn set_default(&mut self, value: bool) {
+        match self {
+            Connection::Jwt { default, .. } => *default = value,
+            Connection::OAuth { default, .. } => *default = value,
+        };
+    }
+
+    pub fn name(&self) -> &String {
+        match self {
+            Connection::Jwt { name, .. } => name,
+            Connection::OAuth { name, .. } => name,
+        }
+    }
+
+    pub fn server(&self) -> &String {
+        match self {
+            Connection::Jwt { server, .. } => server,
+            Connection::OAuth { server, .. } => server,
+        }
+    }
+
+    pub fn default_acccount_id(&self) -> &String {
+        match self {
+            Connection::Jwt {
+                default_acccount_id,
+                ..
+            } => default_acccount_id,
+            Connection::OAuth {
+                default_acccount_id,
+                ..
+            } => default_acccount_id,
+        }
+    }
+
+    pub fn bearer_token(&self) -> &String {
+        match self {
+            Connection::Jwt { token, .. } => token,
+            Connection::OAuth { token, .. } => token.access_token().secret(),
+        }
+    }
+
+    /// Returns `true` if the connection is [`Jwt`].
+    ///
+    /// [`Jwt`]: Connection::Jwt
+    #[must_use]
+    pub fn is_jwt(&self) -> bool {
+        matches!(self, Self::Jwt { .. })
+    }
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct Configuration {
-    pub connections: Vec<ConnectionInfo>,
+    pub connections: Vec<Connection>,
+}
+
+impl Configuration {
+    pub fn upsert_connection(mut self, new: Connection) -> Result<(), ConfigError> {
+        self.connections = self
+            .connections
+            .into_iter()
+            .filter(|c| c.name() == new.name())
+            .collect();
+        self.connections.push(new);
+        if self.connections.len() == 1 {
+            self.connections[0].set_default(true);
+        }
+
+        save_configuration(self)
+    }
 }
 
 fn get_configuration_path() -> Result<PathBuf, ConfigError> {
@@ -38,12 +122,12 @@ pub fn get_configuration() -> Result<Configuration, ConfigError> {
     serde_json::from_str(&config_string).map_err(ConfigError::FailedSerialize)
 }
 
-pub fn get_default_connection() -> Result<ConnectionInfo, ConfigError> {
+pub fn get_default_connection() -> Result<Connection, ConfigError> {
     let config = get_configuration()?;
     let default_connection = config
         .connections
         .iter()
-        .find(|c| c.default)
+        .find(|c| c.is_default())
         .ok_or(ConfigError::NoDefaultConnection)?;
     Ok(default_connection.clone())
 }

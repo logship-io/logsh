@@ -32,9 +32,11 @@ jobs:
           profile: minimal
           toolchain: stable
           override: true
+      
       - name: Release Build
         run: cargo build --release
         working-directory: ./logsh
+      
       - name: 'Upload Artifact'
         uses: actions/upload-artifact@v2
         with:
@@ -49,6 +51,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
+      
       - name: Create Release
         id: create_release
         uses: actions/create-release@v1
@@ -60,14 +63,17 @@ jobs:
           release_name: Release ${{ github.ref }}
           draft: false
           prerelease: false
+      
       - name: Downloading artifacts
         uses: actions/download-artifact@v3
         if: startsWith(github.ref, 'refs/tags/')
         with:
           name: logsh-cli
           path: logsh-cli
+      
       - name: Generate Changelog
         run: git log $(git describe --tags --abbrev=0 HEAD^)..HEAD > ${{ github.workspace }}-CHANGELOG.txt
+      
       - name: Upload Artifact
         id: upload-release-asset
         if: startsWith(github.ref, 'refs/tags/')

@@ -1,10 +1,20 @@
-use std::{path::Path, collections::HashMap, fs::File, io::{prelude::*, BufReader}, time::Duration, thread};
+use std::{
+    collections::HashMap,
+    fs::File,
+    io::{prelude::*, BufReader},
+    path::Path,
+    thread,
+    time::Duration,
+};
 
-use log::{debug, trace, info, warn};
-use reqwest::blocking::Client;
-use serde_json::{Value, Number};
+use crate::{
+    config::{self, Connection},
+    error::{CommonError, UploadError},
+};
 use chrono;
-use crate::{config::{self, ConnectionInfo}, error::{CommonError, UploadError}};
+use log::{debug, info, trace, warn};
+use reqwest::blocking::Client;
+use serde_json::{Number, Value};
 
 use flate2::write::GzEncoder;
 use flate2::Compression;
@@ -31,13 +41,13 @@ struct TsvFileReader {
     reader: BufReader<File>,
     header: Vec<String>,
     schema: String,
-    now : String,
+    now: String,
 
     first: bool,
     converters: Vec<fn(&str) -> Value>,
 }
 
-impl TsvFileReader{
+impl TsvFileReader {
     pub fn new<'b>(path: String, schema: String) -> Self {
         trace!("Opening file: {}", path);
         let file = File::open(path).unwrap();
@@ -45,11 +55,14 @@ impl TsvFileReader{
         let mut buffer = String::new();
         let len = reader.read_line(&mut buffer).unwrap();
         debug!("Read header: {}", buffer[..len].trim());
-        let header = buffer[..len].split("\t").map(|s| s.trim().to_string()).collect();
+        let header = buffer[..len]
+            .split("\t")
+            .map(|s| s.trim().to_string())
+            .collect();
 
         let now = chrono::Utc::now();
 
-        let result: TsvFileReader = TsvFileReader{
+        let result: TsvFileReader = TsvFileReader {
             reader,
             header,
             schema,
@@ -67,7 +80,7 @@ impl FileReader for TsvFileReader {
         match self.reader.read_line(&mut buffer) {
             Ok(size) => {
                 if size == 0 {
-                    return Err(UploadError::Common(CommonError::EndOfFile()))
+                    return Err(UploadError::Common(CommonError::EndOfFile()));
                 }
                 trace!("Read line: {}", buffer[..size].trim());
                 let mut data = HashMap::new();
@@ -76,21 +89,36 @@ impl FileReader for TsvFileReader {
                     self.first = false;
                     buffer[..size].trim().split("\t").for_each(|f| {
                         if f.parse::<bool>().is_ok() {
-                            self.converters.push(|s| s.parse::<bool>().and_then(|op| Ok(Value::Bool(op))).unwrap_or_else(|_| Value::Null));
+                            self.converters.push(|s| {
+                                s.parse::<bool>()
+                                    .and_then(|op| Ok(Value::Bool(op)))
+                                    .unwrap_or_else(|_| Value::Null)
+                            });
                         } else if f.parse::<i64>().is_ok() {
-                            self.converters.push(|s| s.parse::<i64>().and_then(|op| Ok(Value::Number(op.into()))).unwrap_or_else(|_| Value::Null));
+                            self.converters.push(|s| {
+                                s.parse::<i64>()
+                                    .and_then(|op| Ok(Value::Number(op.into())))
+                                    .unwrap_or_else(|_| Value::Null)
+                            });
                         } else if f.parse::<f64>().is_ok() {
-                            self.converters.push(|s| s.parse::<f64>().and_then(|op| Ok(Value::Number(Number::from_f64(op).unwrap()))).unwrap_or_else(|_| Value::Null));
+                            self.converters.push(|s| {
+                                s.parse::<f64>()
+                                    .and_then(|op| Ok(Value::Number(Number::from_f64(op).unwrap())))
+                                    .unwrap_or_else(|_| Value::Null)
+                            });
                         } else {
                             self.converters.push(|s| Value::String(s.to_string()));
                         }
                     });
                 }
 
-                for item in self.header.iter().zip(self.converters.iter().zip(
-                    buffer[..size].trim().split("\t"))) {
+                for item in self.header.iter().zip(
+                    self.converters
+                        .iter()
+                        .zip(buffer[..size].trim().split("\t")),
+                ) {
                     trace!("Adding item: {:?}", item);
-                    data.insert(item.0.to_owned(), item.1.0(item.1.1));
+                    data.insert(item.0.to_owned(), item.1 .0(item.1 .1));
                 }
 
                 let record = Record {
@@ -99,10 +127,8 @@ impl FileReader for TsvFileReader {
                     data,
                 };
                 Ok(record)
-            },
-            Err(e) => {
-                return Err(UploadError::FailedToReadFile(e))
             }
+            Err(e) => return Err(UploadError::FailedToReadFile(e)),
         }
     }
 
@@ -116,54 +142,76 @@ impl FileReader for TsvFileReader {
 fn create_file_reader(path: &Path, schema: String) -> Result<Box<dyn FileReader>, UploadError> {
     let extension = path.extension().unwrap().to_str().unwrap();
     debug!("Resolved file extension: {}", extension);
-    
+
     match extension {
         "tsv" => {
-            return Ok(Box::new(TsvFileReader::new(path.to_str().unwrap().to_string(), schema)));
+            return Ok(Box::new(TsvFileReader::new(
+                path.to_str().unwrap().to_string(),
+                schema,
+            )));
         }
         _ => {
             return Err(UploadError::UnsupportedFileExtension(extension.to_string()));
         }
     }
-    
 }
 
-fn push_records(client: &Client, connection: &ConnectionInfo, records: &Vec<Record>, attempts: i32) -> Result<(), UploadError> {
+fn push_records(
+    client: &Client,
+    connection: &Connection,
+    records: &Vec<Record>,
+    attempts: i32,
+) -> Result<(), UploadError> {
     let mut i = 0;
     loop {
         let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
         serde_json::to_writer(&mut encoder, &records).unwrap();
         let result = encoder.finish().unwrap();
         debug!("GZIP length: {}", result.len());
-        match client.post(format!(
-            "{}/inflow/{}",
-            connection.server, &connection.default_acccount_id
-        ))
-        .body(result)
-        .header("Authorization", "Bearer ".to_owned() + &connection.token)
-        .header("content-type", "application/json")
-        .header("content-encoding", "gzip")
-        .send() {
+        match client
+            .post(format!(
+                "{}/inflow/{}",
+                connection.server(),
+                connection.default_acccount_id()
+            ))
+            .body(result)
+            .header(
+                "Authorization",
+                format!("Bearer {}", connection.bearer_token()),
+            )
+            .header("content-type", "application/json")
+            .header("content-encoding", "gzip")
+            .send()
+        {
             Ok(res) => {
                 if res.status() != 200 {
-                    return Err(UploadError::UploadFailureStatus(res.status().as_u16() as i32, res.text().unwrap()));
+                    return Err(UploadError::UploadFailureStatus(
+                        res.status().as_u16() as i32,
+                        res.text().unwrap(),
+                    ));
                 }
 
-                debug!("Uploaded {} records with result {:?}", records.len(), res.status());
+                debug!(
+                    "Uploaded {} records with result {:?}",
+                    records.len(),
+                    res.status()
+                );
                 return Ok(());
-            },
+            }
             Err(e) => {
                 i += 1;
                 if i >= attempts {
                     return Err(UploadError::UploadFailure(e));
                 }
 
-                warn!("Failed to upload records: {} Retrying attempt {} out of {}", e, i, attempts);
+                warn!(
+                    "Failed to upload records: {} Retrying attempt {} out of {}",
+                    e, i, attempts
+                );
                 thread::sleep(Duration::from_secs(1));
                 continue;
             }
         }
-
     }
 }
 
@@ -171,12 +219,16 @@ pub fn execute<'a>(schema_str: &'a str, path_str: &'a str) -> Result<(), UploadE
     let connection = config::get_default_connection().map_err(UploadError::Config)?;
     if path_str.trim().is_empty() {
         debug!("Uploading file: {:?}", path_str);
-        return Err(UploadError::Common(CommonError::EmptyArgument("path".to_string())));
+        return Err(UploadError::Common(CommonError::EmptyArgument(
+            "path".to_string(),
+        )));
     }
 
     let path = Path::new(path_str);
     if !path.exists() {
-        return Err(UploadError::Common(CommonError::FileNotFound(path_str.to_string())));
+        return Err(UploadError::Common(CommonError::FileNotFound(
+            path_str.to_string(),
+        )));
     }
 
     if path.extension().is_none() {
@@ -186,23 +238,21 @@ pub fn execute<'a>(schema_str: &'a str, path_str: &'a str) -> Result<(), UploadE
     let client = reqwest::blocking::Client::new();
 
     let mut previous_update = chrono::Utc::now();
-    let mut upload_set : Vec<Record> = Vec::new();
+    let mut upload_set: Vec<Record> = Vec::new();
     let mut reader = create_file_reader(path, schema_str.to_string())?;
     loop {
-            match reader.read() {
+        match reader.read() {
             Ok(record) => {
                 upload_set.push(record);
-            },
-            Err(e) => {
-                match e {
-                    UploadError::Common(CommonError::EndOfFile()) => {
-                        break;
-                    },
-                    _ => {
-                        return Err(e);
-                    }
-                }
             }
+            Err(e) => match e {
+                UploadError::Common(CommonError::EndOfFile()) => {
+                    break;
+                }
+                _ => {
+                    return Err(e);
+                }
+            },
         }
 
         if upload_set.len() >= 20000 {
@@ -223,4 +273,3 @@ pub fn execute<'a>(schema_str: &'a str, path_str: &'a str) -> Result<(), UploadE
 
     Ok(())
 }
-

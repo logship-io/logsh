@@ -30,7 +30,6 @@ pub enum CliError {
     QueryError(QueryError),
 }
 
-
 #[derive(Debug, Error)]
 pub enum CommonError {
     #[error("File not found: {0}")]
@@ -86,6 +85,9 @@ pub enum QueryError {
 
     #[error("HTTP {0} | {1}")]
     HttpErrorStatus(reqwest::StatusCode, String),
+
+    #[error("Failed to parse query response: {0}")]
+    ClientBuilderError(reqwest::Error),
 }
 
 #[derive(Debug, Error)]

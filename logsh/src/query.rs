@@ -59,7 +59,8 @@ pub fn execute_query<W: Write>(command: QueryCommand, mut write: W) -> Result<()
 
     let r = logsh_core::query::execute(&query)?;
     log::debug!("Response text: {:?}", r);
-    let result = logsh_core::query::result(&r)?;
+    let result = logsh_core::query::result(&r)
+        .map_err(|e| anyhow!("Unable to parse query result. Maybe try re-authenticating? {e}"))?;
     let query_duration = start.elapsed();
     let render_start = Instant::now();
     log::trace!("Finished query execution.");

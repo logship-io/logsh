@@ -1,7 +1,5 @@
-use std::collections::HashMap;
-
-use log::trace;
 use serde_json::value::RawValue;
+use std::collections::HashMap;
 
 use crate::{config, error::QueryError};
 
@@ -49,18 +47,23 @@ pub fn execute(query: &'_ str) -> Result<String, QueryError> {
 
     let map = HashMap::from([("query", query)]);
 
-    let client = reqwest::blocking::Client::new();
+    let client = reqwest::blocking::Client::builder()
+        .build()
+        .map_err(QueryError::ClientBuilderError)?;
     let res = client
         .post(format!(
             "{}/search/{}/kusto",
-            connection.server, &connection.default_acccount_id
+            connection.server(),
+            connection.default_acccount_id()
         ))
         .json(&map)
-        .header("Authorization", "Bearer ".to_owned() + &connection.token)
+        .header(
+            "Authorization",
+            format!("Bearer {}", connection.bearer_token()),
+        )
         .send()
         .map_err(QueryError::FailedToConnect)?;
 
-    trace!("Response: {:?}", res);
     let status = res.status();
     let result_text = res.text().map_err(QueryError::FailedToParseResponse)?;
 
