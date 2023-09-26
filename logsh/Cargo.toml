@@ -6,13 +6,13 @@ build = "build.rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [profile.release]
-strip = "symbols"
-opt-level = 's'
-panic = "abort"
 lto = true
+opt-level = 3
+panic = "abort"
+strip = "symbols"
 
 [dependencies]
-logsh-core = { version = "0.1.0", path = "logsh-core" }
+logsh-core = { path = "logsh-core" }
 clap = { version = "4.3.22", features = ["derive"] }
 pretty_env_logger = "0.5.0"
 log = { version = "0.4.20" }

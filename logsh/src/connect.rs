@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Error};
 use clap::Subcommand;
-use logsh_core::query::QueryResultFmt;
+use logsh_core::{query::QueryResultFmt, config};
 use std::{collections::HashMap, io::Write};
 use term_table::{
     row::Row,
@@ -32,8 +32,8 @@ pub enum ConnectCommand {
     Login {
         #[arg(help = "Name of the connection. Just for your own reference.")]
         name: String,
-        #[arg(help = "Logship server. e.g. https://logship.io")]
-        server: String,
+        #[arg(help = "Logship server. e.g. https://logship.io. Optional, for refreshing credentials for a server that is already configured.")]
+        server: Option<String>,
         #[arg(long, help = "Set this connection as the default connection.")]
         default: bool,
     },
@@ -85,8 +85,18 @@ fn connect(
     .map_err(|e| anyhow!("Failed to connect: {}", e))
 }
 
-fn login(name: String, server: String, default: bool) -> Result<(), Error> {
-    logsh_core::connect::login(name, server, default).map_err(|e| anyhow!("Failed to login: {}", e))
+fn login(name: String, server: Option<String>, default: bool) -> Result<(), Error> {
+    let server = if let Some(s) = server {
+        s
+    } else {
+        let config = config::get_configuration()?
+            .connections.into_iter().find(|c| c.name() == &name)
+            .ok_or(anyhow!("Failed to find a configured connection with name \"{}\". Use the SERVER arg for an initial connection. or `logsh connection list` to view existing connections.", name))?;
+        config.server().to_owned()
+    };
+
+    logsh_core::connect::login(name, server, default)
+        .map_err(|e| anyhow!("Failed to login: {}", e))
 }
 
 fn list<W: Write>(mut write: W, mode: Option<OutputMode>) -> Result<(), Error> {
