@@ -20,13 +20,9 @@ pub struct VersionCommand {
 pub fn version<W: Write>(
     mut write: W,
     command: VersionCommand,
-    level: log::LevelFilter,
+    level: u8,
 ) -> Result<(), Error> {
     let mut welcome = String::from("\n");
-    let level = match level {
-        log::LevelFilter::Off | log::LevelFilter::Error => 0,
-        _ => level as u32,
-    };
 
     if level > 0 {
         for row in 0..ROWS {

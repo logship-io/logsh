@@ -9,6 +9,7 @@ mod version;
 
 #[derive(Parser, Debug)]
 #[clap(name = "logsh", author = "logship.llc")]
+#[command(arg_required_else_help = true)]
 struct Args {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -45,7 +46,7 @@ fn main() -> Result<(), Error> {
         Some(Commands::Query(command)) => crate::query::execute_query(command, std::io::stdout()),
         Some(Commands::Upload(command)) => crate::upload::execute_upload(command),
         Some(Commands::Version(command)) => {
-            crate::version::version(std::io::stdout(), command, log_level)
+            crate::version::version(std::io::stdout(), command, cli.verbose)
         }
         None => Err(anyhow::anyhow!("No command provided.")),
     };
