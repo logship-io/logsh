@@ -56,7 +56,7 @@ pub fn version<W: Write>(
 
         log::info!("Checking for updates...");
         let latest = self_update::backends::github::Update::configure()
-            .repo_owner("logsink")
+            .repo_owner("logship-io")
             .repo_name("logsh")
             .bin_name("logsh")
             .show_download_progress(true)
