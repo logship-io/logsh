@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Error};
-use clap::Subcommand;
-use logsh_core::{query::QueryResultFmt, config};
+
+use colored::Colorize;
+use logsh_core::{config, connect::Connection, error::AuthError, query::QueryResultFmt};
 use std::{collections::HashMap, io::Write};
 use term_table::{
     row::Row,
@@ -8,99 +9,172 @@ use term_table::{
     Table, TableStyle,
 };
 
-use crate::{query::markdown_style, OutputMode};
+use crate::{
+    config::{AddConnectionCommand, ConfigConnectionCommand, OAuthFlow},
+    query::markdown_style,
+    OutputMode,
+};
 
-#[derive(Subcommand, Debug)]
-#[clap(about = "Connect to a Logship server.")]
-pub enum ConnectCommand {
-    #[clap(about = "Add a new connection.")]
-    Add {
-        #[arg(help = "Name of the connection. Just for your own reference.")]
-        name: String,
-        #[arg(help = "Logship server. e.g. https://logship.io")]
-        server: String,
-        #[arg(long, help = "Set this connection as the default connection.")]
-        default: bool,
-
-        #[arg(short, long, help = "Username to authenticate with.")]
-        user: String,
-
-        #[arg(short, long, help = "Password to authenticate with.")]
-        password: Option<String>,
-    },
-    #[clap(about = "Use OAuth2 to login to a connection.")]
-    Login {
-        #[arg(help = "Name of the connection. Just for your own reference.")]
-        name: String,
-        #[arg(help = "Logship server. e.g. https://logship.io. Optional, for refreshing credentials for a server that is already configured.")]
-        server: Option<String>,
-        #[arg(long, help = "Set this connection as the default connection.")]
-        default: bool,
-    },
-    #[clap(about = "List existing connections.")]
-    List {
-        #[arg(short, long, help = "Output result format")]
-        output: Option<OutputMode>,
-    },
-    #[clap(about = "Modify the currently defaulted connection.")]
-    Default {
-        #[arg(help = "Name of the connection to set as default.")]
-        name: String,
-    },
-}
-
-pub fn execute_connect(command: ConnectCommand) -> Result<(), Error> {
+pub fn execute_connect(command: ConfigConnectionCommand) -> Result<(), Error> {
     match command {
-        ConnectCommand::Add {
+        ConfigConnectionCommand::Add(AddConnectionCommand::Basic {
             name,
             server,
             default,
-            user,
+            username,
             password,
-        } => connect(name, server, default, user, password),
-        ConnectCommand::Login {
+        }) => {
+            log::trace!("Entering {}.", "add user connection".bright_black().bold());
+            let default = default.unwrap_or(true);
+            let mut cfg = logsh_core::config::load()?;
+            let username = match username {
+                Some(username) => username,
+                None => {
+                    println!(
+                        "{}{}{}{}",
+                        "Please enter your ".cyan(),
+                        "logship ".blue(),
+                        "username".cyan().bold(),
+                        ":".cyan(),
+                    );
+                    let mut username = String::new();
+                    let _ = std::io::stdin().read_line(&mut username)?;
+                    username.trim().to_string()
+                }
+            };
+
+            log::debug!(
+                "Authenticating with username: {}",
+                username.clone().yellow()
+            );
+
+            let connection = Connection::new(&server);
+            let auth = Some(logsh_core::auth::AuthRequest::Jwt {
+                username: username.clone(),
+                password: || {
+                    if let Some(password) = password {
+                        return Ok(password);
+                    }
+
+                    return rpassword::prompt_password(format!(
+                        "{}{}{}{} ",
+                        "Please enter your ".cyan(),
+                        "logship user".blue(),
+                        "password".cyan().bold(),
+                        ":".cyan(),
+                    ))
+                    .map_err(logsh_core::error::BasicAuthError::IOError)
+                    .map_err(logsh_core::error::AuthError::BasicAuth);
+                },
+            });
+
+            let c = logsh_core::connect::add_connect(name.clone(), Some(connection), auth);
+            match c {
+                Ok(connection) => {
+                    log::debug!(
+                        "User {} added as default: {}",
+                        username.yellow(),
+                        default.to_string().blue()
+                    );
+                    if default {
+                        cfg.default_connection = name.clone();
+                    }
+
+                    cfg.connections.insert(name, connection);
+                    log::info!("Saving new connection.");
+                    logsh_core::config::save(cfg)?;
+                }
+                Err(err) => {
+                    return Err(anyhow!("Error adding connection: {err}"));
+                }
+            };
+
+            Ok(())
+        }
+        ConfigConnectionCommand::Add(AddConnectionCommand::OAuth {
             name,
             server,
             default,
-        } => login(name, server, default),
-        ConnectCommand::List { output } => list(std::io::stdout(), output),
-        ConnectCommand::Default { name } => set_default(name),
+            flow,
+        }) => {
+            let c = Connection::new(&server);
+            let c = logsh_core::connect::add_connect::<Box<dyn FnOnce() -> Result<String, AuthError>>>(
+                name.clone(),
+                Some(c),
+                Some(logsh_core::auth::AuthRequest::OAuth {
+                    client_id: String::default(),
+                    device_endpoint: None,
+                    scopes: vec![],
+                    authorize_endpoint: String::default(),
+                    token_endpoint: String::default(),
+                    flow: match flow {
+                        OAuthFlow::Device => logsh_core::auth::oauth::OAuthFlow::Device,
+                        // OAuthFlow::Browser => logsh_core::auth::oauth::OAuthFlow::Code,
+                    },
+                }),
+            )
+            .map_err(|err| anyhow!("Failed to connect with OAuth: {err}"))?;
+
+            let mut cfg = config::load()?;
+            if let Some(_old) = cfg.connections.insert(name.clone(), c) {
+                log::info!(
+                    "New OAuth connection \"{}\" replacing existing connection.",
+                    name.yellow().dimmed()
+                )
+            }
+
+            if default.unwrap_or(true) {
+                log::info!(
+                    "Setting OAuth connection \"{}\" as default connection.",
+                    name.yellow().dimmed()
+                );
+                cfg.default_connection = name.clone();
+            }
+            config::save(cfg)?;
+            Ok(())
+        }
+        ConfigConnectionCommand::List { output } => list(std::io::stdout(), false, output),
+        ConfigConnectionCommand::Remove { name } => {
+            let mut cfg = config::load()?;
+            if let Some(_conn) = cfg.connections.remove(&name) {
+                log::info!("Removing connection with name: {}", name.clone().yellow());
+            } else {
+                log::info!(
+                    "No connection with name: \"{}\".",
+                    name.clone().red().blink()
+                );
+            }
+
+            config::save(cfg)?;
+            Ok(())
+        },
+        ConfigConnectionCommand::Default { name } => {
+            let mut cfg = config::load()?;
+            if false == cfg.connections.contains_key(&name) {
+                return Err(anyhow!("Connection \"{name}\" does not exist in configuration."));
+            }
+
+            cfg.default_connection = name;
+            config::save(cfg)?;
+            Ok(())
+        },
+        
     }
 }
 
-fn connect(
-    name: String,
-    server: String,
-    default: bool,
-    user: String,
-    password: Option<String>,
-) -> Result<(), Error> {
-    logsh_core::connect::connect(name, server, default, user, || {
-        if let Some(password) = password {
-            return Ok(password);
-        }
+fn list<W: Write>(mut write: W, color: bool, mode: Option<OutputMode>) -> Result<(), Error> {
+    let config = logsh_core::config::load()?;
+    let list: Vec<_> = config
+        .connections
+        .into_iter()
+        .map(|c| crate::fmt::Connection {
+            name: c.0.to_string(),
+            server: c.1.server.to_string(),
+            is_default: c.0 == config.default_connection,
+            username: c.1.username.to_string(),
+        })
+        .collect();
 
-        rpassword::prompt_password("Enter logship password: ")
-    })
-    .map_err(|e| anyhow!("Failed to connect: {}", e))
-}
-
-fn login(name: String, server: Option<String>, default: bool) -> Result<(), Error> {
-    let server = if let Some(s) = server {
-        s
-    } else {
-        let config = config::get_configuration()?
-            .connections.into_iter().find(|c| c.name() == &name)
-            .ok_or(anyhow!("Failed to find a configured connection with name \"{}\". Use the SERVER arg for an initial connection. or `logsh connection list` to view existing connections.", name))?;
-        config.server().to_owned()
-    };
-
-    logsh_core::connect::login(name, server, default)
-        .map_err(|e| anyhow!("Failed to login: {}", e))
-}
-
-fn list<W: Write>(mut write: W, mode: Option<OutputMode>) -> Result<(), Error> {
-    let config = logsh_core::config::get_configuration()?;
     match mode.unwrap_or_default() {
         OutputMode::Table | OutputMode::Markdown => {
             let mut table = Table::new();
@@ -110,16 +184,30 @@ fn list<W: Write>(mut write: W, mode: Option<OutputMode>) -> Result<(), Error> {
                 _ => unreachable!(),
             };
             table.add_row(Row::new(vec![
-                TableCell::new_with_alignment("Name", 1, Alignment::Center),
-                TableCell::new_with_alignment("Server", 1, Alignment::Center),
-                TableCell::new_with_alignment("Default", 1, Alignment::Center),
+                TableCell::new_with_alignment("Name".bright_white().bold(), 1, Alignment::Left),
+                TableCell::new_with_alignment("Server".bright_white().bold(), 1, Alignment::Center),
+                TableCell::new_with_alignment("Default".bright_white().bold(), 1, Alignment::Left),
+                TableCell::new_with_alignment(
+                    "Logged in User".bright_white().bold(),
+                    1,
+                    Alignment::Right,
+                ),
             ]));
 
-            config.connections.iter().for_each(|f| {
+            list.iter().for_each(|f| {
                 table.add_row(Row::new(vec![
-                    TableCell::new_with_alignment(f.name(), 1, Alignment::Center),
-                    TableCell::new_with_alignment(f.server(), 1, Alignment::Center),
-                    TableCell::new_with_alignment(f.is_default().to_string(), 1, Alignment::Center),
+                    TableCell::new_with_alignment(&f.name.white(), 1, Alignment::Left),
+                    TableCell::new_with_alignment(&f.server.blue(), 1, Alignment::Center),
+                    TableCell::new_with_alignment(
+                        if f.is_default {
+                            "true".green()
+                        } else {
+                            "false".red()
+                        },
+                        1,
+                        Alignment::Left,
+                    ),
+                    TableCell::new_with_alignment(f.username.bright_black(), 1, Alignment::Right),
                 ]));
             });
 
@@ -128,31 +216,30 @@ fn list<W: Write>(mut write: W, mode: Option<OutputMode>) -> Result<(), Error> {
             writeln!(write, "{}", render).map_err(|e| anyhow!("Failed to write output: {}", e))
         }
         OutputMode::Json => {
-            let json = serde_json::to_string(&config)?;
+            let json = serde_json::to_string(&list)?;
             writeln!(write, "{}", json).map_err(|e| anyhow!("Failed to write json output: {}", e))
         }
         OutputMode::JsonPretty => {
-            let json = serde_json::to_string_pretty(&config)?;
+            let json = serde_json::to_string_pretty(&list)?;
             writeln!(write, "{}", json)
                 .map_err(|e| anyhow!("Failed to write pretty json output: {}", e))
         }
         OutputMode::Csv => {
-            let results = config
-                .connections
+            let results = list
                 .iter()
                 .map(|c| {
                     HashMap::from([
                         (
                             "Name".to_string(),
-                            serde_json::Value::String(c.name().to_string()),
+                            serde_json::Value::String(c.name.to_string()),
                         ),
                         (
                             "Server".to_string(),
-                            serde_json::Value::String(c.server().to_string()),
+                            serde_json::Value::String(c.server.to_string()),
                         ),
                         (
                             "Default".to_string(),
-                            serde_json::Value::String(c.is_default().to_string()),
+                            serde_json::Value::String(c.is_default.to_string()),
                         ),
                     ])
                 })
@@ -172,12 +259,8 @@ fn list<W: Write>(mut write: W, mode: Option<OutputMode>) -> Result<(), Error> {
                 .as_str()
                 .try_into()
                 .map_err(|e| anyhow::anyhow!("Error converting connection json to csv: {}", e))?;
-            logsh_core::csv::write_csv(&query, write)
+            logsh_core::csv::write_csv(&query, color, write)
                 .map_err(|e| anyhow!("Failed to write csv output: {}", e))
         }
     }
-}
-
-fn set_default(name: String) -> Result<(), Error> {
-    logsh_core::connect::set_default(name).map_err(|e| anyhow!("Failed to set default: {}", e))
 }

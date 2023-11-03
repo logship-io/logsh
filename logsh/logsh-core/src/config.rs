@@ -1,141 +1,115 @@
-use oauth2::TokenResponse;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashMap,
     fs,
     path::{Path, PathBuf},
+    sync::OnceLock,
 };
 
-use crate::{connect::OAuthToken, error::ConfigError};
+use crate::{connect::Connection, error::ConfigError};
+static mut CONFIG_PATH: OnceLock<Result<PathBuf, ConfigError>> = OnceLock::new();
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub enum Connection {
-    Jwt {
-        name: String,
-        server: String,
-        token: String,
-        default: bool,
-        default_acccount_id: String,
-    },
-    OAuth {
-        name: String,
-        server: String,
-        token: OAuthToken,
-        default: bool,
-        default_acccount_id: String,
-    },
-}
-
-impl Connection {
-    pub fn is_default(&self) -> bool {
-        match self {
-            Connection::Jwt { default, .. } => *default,
-            Connection::OAuth { default, .. } => *default,
-        }
-    }
-
-    pub fn set_default(&mut self, value: bool) {
-        match self {
-            Connection::Jwt { default, .. } => *default = value,
-            Connection::OAuth { default, .. } => *default = value,
-        };
-    }
-
-    pub fn name(&self) -> &String {
-        match self {
-            Connection::Jwt { name, .. } => name,
-            Connection::OAuth { name, .. } => name,
-        }
-    }
-
-    pub fn server(&self) -> &String {
-        match self {
-            Connection::Jwt { server, .. } => server,
-            Connection::OAuth { server, .. } => server,
-        }
-    }
-
-    pub fn default_acccount_id(&self) -> &String {
-        match self {
-            Connection::Jwt {
-                default_acccount_id,
-                ..
-            } => default_acccount_id,
-            Connection::OAuth {
-                default_acccount_id,
-                ..
-            } => default_acccount_id,
-        }
-    }
-
-    pub fn bearer_token(&self) -> &String {
-        match self {
-            Connection::Jwt { token, .. } => token,
-            Connection::OAuth { token, .. } => token.access_token().secret(),
-        }
-    }
-
-    /// Returns `true` if the connection is [`Jwt`].
-    ///
-    /// [`Jwt`]: Connection::Jwt
-    #[must_use]
-    pub fn is_jwt(&self) -> bool {
-        matches!(self, Self::Jwt { .. })
-    }
-}
-
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Configuration {
-    pub connections: Vec<Connection>,
+    pub default_connection: String,
+    pub connections: HashMap<String, Connection>,
 }
 
 impl Configuration {
-    pub fn upsert_connection(mut self, new: Connection) -> Result<(), ConfigError> {
-        self.connections = self
-            .connections
-            .into_iter()
-            .filter(|c| c.name() == new.name())
-            .collect();
-        self.connections.push(new);
-        if self.connections.len() == 1 {
-            self.connections[0].set_default(true);
+    pub fn get_default_connection(&self) -> Option<Connection> {
+        if let Some(c) = self.connections.get(&self.default_connection) {
+            return Some(c.clone());
         }
 
-        save_configuration(self)
+        self.connections.values().into_iter().next().cloned()
     }
 }
 
-fn get_configuration_path() -> Result<PathBuf, ConfigError> {
-    let home_dir = home::home_dir().ok_or(ConfigError::NoHome)?;
-    Ok(home_dir.join(Path::new(".logsh.json")))
-}
-
-pub fn get_configuration() -> Result<Configuration, ConfigError> {
-    let config_path = get_configuration_path()?;
-    if !config_path.exists() {
-        return Ok(Configuration {
-            connections: Vec::new(),
-        });
+impl Default for Configuration {
+    fn default() -> Self {
+        Self {
+            default_connection: Default::default(),
+            connections: Default::default(),
+        }
     }
-
-    log::debug!("Reading configuration from {:?}", config_path.to_str());
-    let config_string = fs::read_to_string(&config_path).map_err(ConfigError::FailedRead)?;
-    serde_json::from_str(&config_string).map_err(ConfigError::FailedSerialize)
 }
 
-pub fn get_default_connection() -> Result<Connection, ConfigError> {
-    let config = get_configuration()?;
-    let default_connection = config
-        .connections
-        .iter()
-        .find(|c| c.is_default())
-        .ok_or(ConfigError::NoDefaultConnection)?;
-    Ok(default_connection.clone())
+pub fn get_configuration_path() -> Result<PathBuf, ConfigError> {
+    let path = unsafe {
+        CONFIG_PATH.get_or_init(|| {
+            if let Ok(path) = std::env::var("LOGSH_CONFIG_PATH") {
+                if path.trim().len() > 0 {
+                    log::trace!(
+                        "Environment override of config path: {}={}",
+                        "LOGSH_CONFIG_PATH",
+                        &path
+                    );
+
+                    let path = PathBuf::from(&path);
+                    if false == path.exists() {
+                        return Err(ConfigError::InvalidConfigPath(format!(
+                            "{} does not exist.",
+                            &path.to_string_lossy()
+                        )));
+                    }
+
+                    return Ok(path);
+                }
+            }
+
+            let path = home::home_dir()
+                .map(|mut h| {
+                    h.push(Path::new(".logsh"));
+                    h.push(Path::new("logsh-config.json"));
+                    h
+                })
+                .ok_or(ConfigError::NoHome)?;
+            log::trace!("Configuration path: {}", &path.display());
+            if let Some(parent) = path.parent() {
+                if false == parent.exists() {
+                    log::debug!(
+                        "Configuration parent doesn't exist. Creating: {}",
+                        parent.display()
+                    );
+                    std::fs::create_dir_all(&parent)?;
+                }
+            }
+
+            Ok(path)
+        })
+    };
+
+    match path {
+        Ok(p) => Ok(p.clone()),
+        Err(_e) => {
+            match unsafe { CONFIG_PATH.take() } {
+                Some(path) => {
+                    return path;
+                }
+                None => {
+                    // wtf
+                    return Err(ConfigError::InvalidConfigPath("unknown error".to_string()));
+                }
+            }
+        }
+    }
 }
 
-pub fn save_configuration(config: Configuration) -> Result<(), ConfigError> {
-    let config_path = get_configuration_path()?;
-    let serialized = serde_json::to_string(&config).map_err(ConfigError::FailedSerialize)?;
-    fs::write(&config_path, serialized).map_err(ConfigError::FailedWrite)?;
-    log::debug!("Saved configuration to {:?}", config_path);
-    Ok(())
+pub fn load() -> Result<Configuration, ConfigError> {
+    let cfg = get_configuration_path()?;
+    if cfg.exists() {
+        let cfg = fs::read_to_string(cfg).map_err(ConfigError::FailedRead)?;
+        let config = serde_json::from_str(&cfg).map_err(ConfigError::FailedDeserialize)?;
+        return Ok(config);
+    } else {
+        return Ok(Configuration::default());
+    }
+}
+
+pub fn save(config: Configuration) -> Result<Configuration, ConfigError> {
+    let path = get_configuration_path()?;
+    let serialized: String =
+        serde_json::to_string(&config).map_err(ConfigError::FailedSerialize)?;
+    fs::write(&path, serialized).map_err(ConfigError::FailedWrite)?;
+    Ok(config)
 }

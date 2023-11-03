@@ -3,5 +3,12 @@
         "./logsh/Cargo.toml",
         "./logsh/logsh-core/Cargo.toml",
     ],
-    "rust-analyzer.cargo.loadOutDirsFromCheck": true
+    "rust-analyzer.cargo.loadOutDirsFromCheck": true,
+    "cSpell.words": [
+        "gethostname",
+        "kusto",
+        "logsh",
+        "reqwest",
+        "rpassword"
+    ]
 }
