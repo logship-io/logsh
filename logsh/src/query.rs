@@ -6,6 +6,8 @@ use std::{
 
 use anyhow::{anyhow, Error};
 use clap::arg;
+use colored::Colorize;
+use logsh_core::config;
 use term_table::{
     row::Row,
     table_cell::{Alignment, TableCell},
@@ -57,7 +59,13 @@ pub fn execute_query<W: Write>(command: QueryCommand, mut write: W) -> Result<()
         s
     };
 
-    let r = logsh_core::query::execute(&query)?;
+    let cfg = config::load()?;
+    let connection = cfg
+        .get_default_connection()
+        .ok_or(anyhow::anyhow!("No logsh connections"))?;
+    let r = connection.query_raw(&query)
+        .map_err(|err| -> Error { anyhow!("An error occurred during query execution. {err}").context(err) })?;
+
     log::debug!("Response text: {:?}", r);
     let result = logsh_core::query::result(&r)
         .map_err(|e| anyhow!("Unable to parse query result. Maybe try re-authenticating? {e}"))?;
@@ -86,7 +94,7 @@ pub fn execute_query<W: Write>(command: QueryCommand, mut write: W) -> Result<()
         }
         OutputMode::Csv => {
             log::trace!("Outputting CSV");
-            logsh_core::csv::write_csv(&result, write)
+            logsh_core::csv::write_csv(&result, true, write)
                 .map_err(|e| anyhow!("Failed to convert to CSV: {}", e))
         }
     }?;
@@ -124,6 +132,13 @@ fn render_table<W: Write>(
         result
             .header
             .iter()
+            .map(|s| {
+                if is_markdown {
+                    s.to_string()
+                } else {
+                    s.bright_white().bold().to_string()
+                }
+            })
             .map(|f| TableCell::new_with_alignment(f, 1, Alignment::Center)),
     );
     header_row.has_separator = !is_markdown;
@@ -143,7 +158,29 @@ fn render_table<W: Write>(
                     TableCell::new_with_alignment(json, 1, Alignment::Center)
                 }
             }
-            _ => TableCell::new_with_alignment(row[header.as_str()].get(), 1, Alignment::Center),
+            _ => {
+                let str = header.as_str();
+                let json = row[str].get();
+
+                if let Ok(json) = serde_json::Value::from_str(json)
+                {
+                    if false == is_markdown {
+                        match json {
+                            serde_json::Value::Null => return TableCell::new_with_alignment("<null>".bright_black(), 1, Alignment::Center),
+                            serde_json::Value::Bool(b) => return TableCell::new_with_alignment(if b { "true".green() } else { "false".red() }, 1, Alignment::Center),
+                            serde_json::Value::Number(n) => return TableCell::new_with_alignment(n, 1, Alignment::Left),
+                            serde_json::Value::String(s) => return TableCell::new_with_alignment(s, 1, Alignment::Center),
+                            _ => { /* noop */ }
+                        }
+                    }
+
+                    if let Ok(serialized) = serde_json::to_string_pretty(&json) {
+                        return TableCell::new_with_alignment(serialized, 1, Alignment::Center);
+                    }
+                } 
+
+                TableCell::new_with_alignment(json, 1, Alignment::Center)
+            },
         });
 
         let mut row = Row::new(cells);

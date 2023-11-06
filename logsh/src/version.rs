@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Error};
 use self_update::self_replace;
-use std::io::{Write, stdin};
+use std::io::{stdin, Write};
 
 mod build {
     // Generated during build.
@@ -13,15 +13,16 @@ pub struct VersionCommand {
     #[arg(long, group = "update-g", help = "Update to the latest release.")]
     update: bool,
 
-    #[arg(short, long, requires = "update-g", help = "Use with '--update' to skip approval checks.")]
+    #[arg(
+        short,
+        long,
+        requires = "update-g",
+        help = "Use with '--update' to skip approval checks."
+    )]
     yes: bool,
 }
 
-pub fn version<W: Write>(
-    mut write: W,
-    command: VersionCommand,
-    level: u8,
-) -> Result<(), Error> {
+pub fn version<W: Write>(mut write: W, command: VersionCommand, level: u8) -> Result<(), Error> {
     let mut welcome = String::from("\n");
 
     if level > 0 {
@@ -53,7 +54,6 @@ pub fn version<W: Write>(
     .map_err(|e| anyhow!("Failed to write version: {}", e))?;
 
     if command.update {
-
         log::info!("Checking for updates...");
         let latest = self_update::backends::github::Update::configure()
             .repo_owner("logship-io")
@@ -92,20 +92,29 @@ pub fn version<W: Write>(
             };
 
             if false == command.yes {
-                writeln!(write, "Update from version v{} to v{}? [y/n]", build::VERSION, latest.version)?;
+                writeln!(
+                    write,
+                    "Update from version v{} to v{}? [y/n]",
+                    build::VERSION,
+                    latest.version
+                )?;
 
                 let mut buf = String::new();
                 _ = stdin().read_line(&mut buf)?;
                 match buf.trim().to_lowercase().as_str() {
                     "y" | "yes" => {
-                        log::debug!("Update manually approved to v{}, valid yes response: \"{}\"", latest.version, buf);
+                        log::debug!(
+                            "Update manually approved to v{}, valid yes response: \"{}\"",
+                            latest.version,
+                            buf
+                        );
                         log::info!("User approved version update to v{}.", latest.version);
-                    },
+                    }
                     "n" | "no" => {
                         log::debug!("Update manually declined, valid no response: \"{}\"", buf);
                         log::info!("User declined logsh version update to v{}.", latest.version);
                         return Ok(());
-                    },
+                    }
                     _ => {
                         log::warn!("User input was trash. Expected 'n', \"no\", 'y', or \"yes\". Received \"{}\"", buf);
                         log::info!("Exiting logsh version update.");

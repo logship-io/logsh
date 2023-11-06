@@ -12,7 +12,11 @@ pub enum CsvError {
     FailedFlush(std::io::Error),
 }
 
-pub fn write_csv<'a, W: std::io::Write>(query: &QueryResult<'a>, to: W) -> Result<(), CsvError> {
+pub fn write_csv<'a, W: std::io::Write>(
+    query: &QueryResult<'a>,
+    _color: bool,
+    to: W,
+) -> Result<(), CsvError> {
     let mut wtr = csv::Writer::from_writer(to);
 
     // write headers

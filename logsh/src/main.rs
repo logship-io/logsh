@@ -1,14 +1,24 @@
 use std::str::FromStr;
 
 use anyhow::{anyhow, Error};
-use clap::{arg, Parser, Subcommand, ValueEnum};
+use clap::{
+    arg,
+    builder::{
+        styling::{AnsiColor, Effects},
+        Styles,
+    },
+    command, Parser, Subcommand, ValueEnum,
+};
+
+mod config;
 mod connect;
+mod fmt;
 mod query;
 mod upload;
 mod version;
 
-#[derive(Parser, Debug)]
-#[clap(name = "logsh", author = "logship.llc")]
+#[derive(Parser)]
+#[clap(name = "logsh", author = "logship.llc", styles = styles())]
 #[command(arg_required_else_help = true)]
 struct Args {
     #[command(subcommand)]
@@ -18,10 +28,26 @@ struct Args {
     verbose: u8,
 }
 
-#[derive(Subcommand, Debug)]
+fn styles() -> Styles {
+    if std::env::var("NO_COLOR").unwrap_or_default().trim().len() > 0 {
+        return Styles::default();
+    }
+
+    Styles::styled()
+        .header(AnsiColor::BrightBlack.on_default() | Effects::BOLD)
+        .usage(AnsiColor::White.on_default())
+        .literal(AnsiColor::BrightWhite.on_default() | Effects::BOLD)
+        .invalid(AnsiColor::Red.on_default() | Effects::BOLD)
+        .valid(AnsiColor::BrightBlue.on_default())
+        .placeholder(AnsiColor::Green.on_default())
+}
+
+#[derive(Subcommand)]
 enum Commands {
+    #[clap(subcommand)]
+    Connection(crate::config::ConfigConnectionCommand),
     #[command(subcommand)]
-    Connection(crate::connect::ConnectCommand),
+    Config(crate::config::ConfigCommand),
     Query(crate::query::QueryCommand),
     Upload(crate::upload::UploadCommand),
     Version(crate::version::VersionCommand),
@@ -37,6 +63,11 @@ fn main() -> Result<(), Error> {
         _ => log::LevelFilter::Trace,
     };
 
+    let no_color = std::env::var("NO_COLOR").unwrap_or_default().trim().len() > 0;
+    if no_color {
+        colored::control::set_override(false);
+    }
+    
     pretty_env_logger::formatted_builder()
         .filter_level(log_level)
         .init();
@@ -48,6 +79,7 @@ fn main() -> Result<(), Error> {
         Some(Commands::Version(command)) => {
             crate::version::version(std::io::stdout(), command, cli.verbose)
         }
+        Some(Commands::Config(command)) => crate::config::execute_config(command),
         None => Err(anyhow::anyhow!("No command provided.")),
     };
 

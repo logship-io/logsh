@@ -1,7 +1,22 @@
+
 use serde_json::value::RawValue;
 use std::collections::HashMap;
 
-use crate::{config, error::QueryError};
+use crate::error::QueryError;
+
+#[derive(Clone, Copy, Debug, serde::Serialize)]
+pub struct QueryRequest<'a, 'b> {
+    pub query: &'a str,
+    pub variables: &'b [QueryVariable],
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct QueryVariable {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub typ: String,
+    pub value: serde_json::Value,
+}
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 #[serde(bound(deserialize = "'de: 'a"))]
@@ -34,42 +49,6 @@ impl<'a> TryFrom<&'a str> for QueryResult<'a> {
     type Error = QueryError;
 
     fn try_from(value: &'a str) -> Result<Self, Self::Error> {
-        serde_json::from_str(value).map_err(QueryError::JsonError)
+        serde_json::from_str(value).map_err(QueryError::Json)
     }
-}
-
-pub fn execute(query: &'_ str) -> Result<String, QueryError> {
-    let connection = config::get_default_connection().map_err(QueryError::NoConnection)?;
-
-    if query.trim().is_empty() {
-        return Err(QueryError::NoInput);
-    }
-
-    let map = HashMap::from([("query", query)]);
-
-    let client = reqwest::blocking::Client::builder()
-        .build()
-        .map_err(QueryError::ClientBuilderError)?;
-    let res = client
-        .post(format!(
-            "{}/search/{}/kusto",
-            connection.server(),
-            connection.default_acccount_id()
-        ))
-        .json(&map)
-        .header(
-            "Authorization",
-            format!("Bearer {}", connection.bearer_token()),
-        )
-        .send()
-        .map_err(QueryError::FailedToConnect)?;
-
-    let status = res.status();
-    let result_text = res.text().map_err(QueryError::FailedToParseResponse)?;
-
-    if false == status.is_success() {
-        return Err(QueryError::HttpErrorStatus(status, result_text));
-    }
-
-    Ok(result_text)
 }

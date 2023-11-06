@@ -8,7 +8,7 @@ use std::{
 };
 
 use crate::{
-    config::{self, Connection},
+    connect::Connection,
     error::{CommonError, UploadError},
 };
 use chrono;
@@ -168,17 +168,13 @@ fn push_records(
         serde_json::to_writer(&mut encoder, &records).unwrap();
         let result = encoder.finish().unwrap();
         debug!("GZIP length: {}", result.len());
-        match client
-            .post(format!(
+        match connection
+            .authenticate_request(client.post(format!(
                 "{}/inflow/{}",
-                connection.server(),
-                connection.default_acccount_id()
-            ))
+                &connection.server,
+                connection.default_subscription()
+            )))
             .body(result)
-            .header(
-                "Authorization",
-                format!("Bearer {}", connection.bearer_token()),
-            )
             .header("content-type", "application/json")
             .header("content-encoding", "gzip")
             .send()
@@ -215,10 +211,13 @@ fn push_records(
     }
 }
 
-pub fn execute<'a>(schema_str: &'a str, path_str: &'a str) -> Result<(), UploadError> {
-    let connection = config::get_default_connection().map_err(UploadError::Config)?;
+pub fn execute<'a>(
+    schema_str: &'a str,
+    path_str: &'a str,
+    connection: &Connection,
+) -> Result<(), UploadError> {
     if path_str.trim().is_empty() {
-        debug!("Uploading file: {:?}", path_str);
+        log::debug!("Uploading file: {:?}", path_str);
         return Err(UploadError::Common(CommonError::EmptyArgument(
             "path".to_string(),
         )));

@@ -1,262 +1,241 @@
-use oauth2::basic::{BasicClient, BasicTokenType};
-use oauth2::devicecode::StandardDeviceAuthorizationResponse;
-use oauth2::reqwest::http_client;
-use oauth2::{
-    AuthUrl, ClientId, DeviceAuthorizationUrl, EmptyExtraTokenFields, Scope, StandardTokenResponse,
-    TokenUrl,
-};
+use chrono::{Duration, Utc};
+use oauth2::TokenResponse;
 use reqwest::StatusCode;
-use serde::Deserialize;
-use std::collections::HashMap;
-use thiserror::Error;
-use uuid::Uuid;
+use reqwest::blocking::RequestBuilder;
+use reqwest::header::{HeaderMap, HeaderValue};
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::fmt;
 
-use crate::config::Connection;
-use crate::error::ConfigError;
-use crate::{config, error::CliError};
+use crate::auth::{AuthData, AuthRequest};
+use crate::error::{AuthError, ConnectError, OAuthError, QueryError};
+use crate::config;
+use crate::query::QueryRequest;
 
-pub type OAuthToken = StandardTokenResponse<EmptyExtraTokenFields, BasicTokenType>;
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Connection {
+    pub server: String,
+    pub user: Option<uuid::Uuid>,
+    pub username: String,
+    pub default_subscription: Option<uuid::Uuid>,
+    pub subscriptions: HashSet<uuid::Uuid>,
+    auth: Option<AuthData>,
+}
 
-#[derive(Deserialize)]
-struct TokenResponse {
-    token: String,
+impl fmt::Display for Connection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Server: {}; User: {}; Default Subscription: {}",
+            self.server,
+            self.user.unwrap_or_default(),
+            self.default_subscription()
+        )
+    }
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct OAuthConfigResponse {
-    client_id: String,
-    authorize_endpoint: String,
-    device_endpoint: String,
-    token_endpoint: String,
-    scopes: Vec<String>,
+pub struct UserModel {
+    user_id: uuid::Uuid,
+    user_name: String,
+    /*
+     * first_name: String,
+     * last_name: String,
+     * nick_name: String,
+     * contact: Vec<ContactModel>,
+     */
 }
 
-fn fetch_token(server: String, user: String, password: String) -> Result<String, CliError> {
-    let mut map = HashMap::new();
-    map.insert("username", user);
-    map.insert("password", password);
+// #[derive(Deserialize)]
+// #[serde(rename_all = "camelCase")]
+// pub struct ContactModel {
+//     #[serde(rename = "type")]
+//     typ: String,
+//     value: String,
+// }
 
-    let client = reqwest::blocking::Client::new();
-    let res = client
-        .post(format!("{}/auth/token", server.trim_end_matches('/')))
-        .json(&map)
-        .send()
-        .map_err(CliError::UnableToConnect)?;
-
-    let token: TokenResponse = res.json().map_err(CliError::UnableToParseJwtToken)?;
-    Ok(token.token)
-}
-
-pub fn set_default(name: String) -> Result<(), CliError> {
-    let mut existing_config = config::get_configuration().map_err(CliError::UnableToReadConfig)?;
-    existing_config
-        .connections
-        .iter_mut()
-        .for_each(|c| c.set_default(false));
-
-    let connection = existing_config
-        .connections
-        .iter_mut()
-        .find(|c| c.name() == &name);
-
-    match connection {
-        Some(connection) => {
-            connection.set_default(true);
-        }
-        None => {
-            return Err(CliError::NoNamedConnection(name));
+impl Connection {
+    pub fn new(server: &str) -> Self {
+        Self {
+            server: server.trim().to_string(),
+            user: None,
+            username: String::default(),
+            default_subscription: None,
+            subscriptions: HashSet::default(),
+            auth: None,
         }
     }
 
-    config::save_configuration(existing_config).map_err(CliError::UnableToReadConfig)
+    pub fn default_subscription(&self) -> uuid::Uuid {
+        self.default_subscription
+            .as_ref()
+            .or_else(|| self.subscriptions.iter().nth(0))
+            .map(|u| u.clone())
+            .unwrap_or_else(uuid::Uuid::default)
+    }
+
+    pub fn authenticate_request(&self, builder: RequestBuilder) -> RequestBuilder {
+        match &self.auth {
+            Some(AuthData::Jwt { token }) => builder.bearer_auth(token),
+            Some(AuthData::OAuth { data }) => {
+                builder.bearer_auth(data.token.access_token().secret())
+            }
+            None => builder,
+        }
+    }
+
+    pub(crate) fn refresh_oauth(&self) -> Result<OAuthConfigResponse, AuthError> {
+        log::trace!("Requesting OAuth config for connection.");
+        let client = client_builder().build().unwrap();
+        let res = client
+            .get(format!("{}/auth/oauth", self.server.trim_end_matches('/')))
+            .send()?
+            .error_for_status()?;
+        if res.status() == StatusCode::NO_CONTENT {
+            return Err(AuthError::OAuth(OAuthError::ConfigurationError(
+                oauth2::ConfigurationError::MissingUrl("oauth is not configured for this server"),
+            )))?;
+        }
+
+        let json = res.json::<OAuthConfigResponse>()?;
+        Ok(json)
+    }
+
+    pub fn who_am_i(&self) -> Result<UserModel, ConnectError> {
+        log::debug!("Executing who am I query");
+        let client = client_builder().build()?;
+        let response: UserModel = self
+            .authenticate_request(
+                client.get(format!("{}/whoami", &self.server.trim_end_matches('/'))),
+            )
+            .send()?
+            .error_for_status()?
+            .json()?;
+        Ok(response)
+    }
+
+    pub fn refresh_auth<F>(&mut self, auth: Option<AuthRequest<F>>) -> Result<(), ConnectError>
+    where
+        F: FnOnce() -> Result<String, AuthError>,
+    {
+        log::debug!("Refreshing authentication for {self}");
+        let client = client_builder().build()?;
+        match (&self.auth, auth) {
+            (None, None) => {
+                return Err(ConnectError::NoAuthentication);
+            }
+            (Some(a), None) => match a {
+                AuthData::Jwt { token: _ } => return Err(ConnectError::Auth(AuthError::Expired)),
+                AuthData::OAuth { data } => {
+                    if let Some(expires_in) = data.token.expires_in() {
+                        let expiry = data.received
+                            .checked_add_signed(Duration::seconds(expires_in.as_secs() as i64))
+                            .ok_or(ConnectError::Auth(AuthError::Expired))?;
+                        if Utc::now() > expiry {
+                            log::warn!("OAuth token is expired.");
+                            return Err(ConnectError::Auth(AuthError::Expired));
+                        }
+                    }
+
+                    return Ok(());
+                }
+            },
+            (_, Some(a)) => {
+                let auth = a.authenticate(client, self).map_err(ConnectError::Auth)?;
+                self.auth = Some(auth);
+                Ok(())
+            }
+        }
+    }
+
+    pub fn query_raw(&self, query: &str) -> Result<String, QueryError> {
+        if query.trim().is_empty() {
+            return Err(QueryError::NoInput);
+        }
+        
+        log::trace!("Executing query.");
+        let req = QueryRequest {
+            query,
+            variables: &[],
+        };
+
+        let client = client_builder().build()?;
+        let response = self
+            .authenticate_request(client.post(format!(
+                "{}/search/{}/kusto",
+                &self.server.trim_end_matches('/'),
+                &self.default_subscription()
+            )))
+            .json(&req)
+            .send()?
+            .error_for_status()?
+            .text()?;
+        Ok(response)
+    }
 }
 
-#[derive(Debug, Error)]
-pub enum ConnectError<T: std::error::Error> {
-    #[error("Client error: {0}")]
-    CliError(crate::error::CliError),
-
-    #[error("Callback error: {0}")]
-    CallbackError(T),
-
-    #[error("HTTP Response Failed: {0}")]
-    HttpResponseFailed(reqwest::StatusCode),
-
-    #[error("OAuth2 not configured on this server.")]
-    NoOauthConfiguration,
-
-    #[error("JSON Error: {0}")]
-    HttpError(reqwest::Error),
-
-    #[error("Invalid OAuth Configuration: {0}")]
-    InvalidConfigError(String),
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OAuthConfigResponse {
+    pub client_id: String,
+    pub authorize_endpoint: String,
+    pub device_endpoint: String,
+    pub token_endpoint: String,
+    pub scopes: Vec<String>,
 }
 
-#[derive(Debug, Error)]
-pub enum LoginError {
-    #[error("Client error: {0}")]
-    CliError(crate::error::CliError),
+static USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"),);
 
-    #[error("Configuration error during login: {0}")]
-    ConfigError(#[from] ConfigError),
-
-    #[error("HTTP Response Failed: {0}")]
-    HttpResponseFailed(reqwest::StatusCode),
-
-    #[error("OAuth2 not configured on this server.")]
-    NoOAuthConfiguration,
-
-    #[error("JSON Error: {0}")]
-    HttpError(reqwest::Error),
-
-    #[error("Invalid OAuth Configuration: {0}")]
-    InvalidConfigError(String),
-
-    #[error("OAuth Failed. No tokens in response.")]
-    TokenResponseError,
+fn client_builder() -> reqwest::blocking::ClientBuilder {
+    reqwest::blocking::Client::builder()
+        .user_agent(USER_AGENT)
+        .default_headers({
+            let mut h = HeaderMap::new();
+            let host = gethostname::gethostname().to_string_lossy().to_string();
+            if let Ok(host) = HeaderValue::from_str(&host) {
+                h.insert("x-ls-hostname", host);
+            }
+            h
+        })
 }
 
-pub fn connect<'a, E, F>(
+pub fn add_connect<'a, F>(
     name: String,
-    server: String,
-    default: bool,
-    user: String,
-    password_cb: F,
-) -> Result<(), ConnectError<E>>
+    mut connection: Option<Connection>,
+    auth: Option<AuthRequest<F>>,
+) -> Result<Connection, ConnectError>
 where
-    F: FnOnce() -> Result<String, E>,
-    E: std::error::Error,
+    F: FnOnce() -> Result<String, AuthError>,
 {
-    log::debug!("Connecting to {} at {}", name, server);
-    let mut existing_config = config::get_configuration()
-        .map_err(CliError::UnableToReadConfig)
-        .map_err(ConnectError::CliError)?;
+    let connection: Connection = {
+        let mut cfg = config::load()?;
+        let conn_entry = cfg.connections.entry(name.clone());
+        let c = if let Some(c) = connection.as_mut() {
+            c.refresh_auth(auth)?;
+            let user = c.who_am_i()?;
+            c.user = Some(user.user_id);
+            c.username = user.user_name;
+            Ok(c.clone())
+        } else {
+            match conn_entry {
+                std::collections::hash_map::Entry::Occupied(mut o) => {
+                    let c = o.get_mut();
+                    c.refresh_auth(auth)?;
+                    let user = c.who_am_i()?;
+                    c.user = Some(user.user_id);
+                    c.username = user.user_name;
+                    Ok(c.clone())
+                },
+                std::collections::hash_map::Entry::Vacant(_) => {
+                    Err(ConnectError::NoConnection(name))
+                }
+            }
+        }?;
 
-    let should_default = default || existing_config.connections.is_empty();
-    if should_default {
-        existing_config
-            .connections
-            .iter_mut()
-            .for_each(|c| c.set_default(false));
-    }
-
-    let pass = password_cb().map_err(ConnectError::CallbackError)?;
-    let token = fetch_token(server.clone(), user, pass).map_err(ConnectError::CliError)?;
-    log::debug!("Successfully received token");
-
-    let mut existing_connection = existing_config
-        .connections
-        .iter_mut()
-        .find(|c| c.name() == &name);
-    let server_name = server.clone();
-    let token_value = token.clone();
-
-    if let Some(c) = &existing_connection {
-        if false == c.is_jwt() {
-            existing_config.connections = existing_config
-                .connections
-                .into_iter()
-                .filter(|c| c.name() != &name)
-                .collect();
-            existing_connection = None;
-        }
-    }
-
-    match existing_connection {
-        Some(Connection::Jwt {
-            server,
-            token,
-            default,
-            ..
-        }) => {
-            *server = server_name;
-            *default = should_default;
-            *token = token_value;
-        }
-        _ => {
-            existing_config.connections.push(config::Connection::Jwt {
-                name,
-                server,
-                default: should_default,
-                token,
-                default_acccount_id: Uuid::nil().to_string(),
-            });
-        }
-    }
-
-    config::save_configuration(existing_config)
-        .map_err(CliError::UnableToWriteConfig)
-        .map_err(ConnectError::CliError)
-}
-
-pub fn login(name: String, server: String, default: bool) -> Result<(), LoginError> {
-    let client = reqwest::blocking::Client::new();
-    let res = client
-        .get(format!("{}/auth/oauth", server.trim_end_matches('/')))
-        .send()
-        .map_err(CliError::UnableToConnect)
-        .map_err(LoginError::CliError)?;
-    if false == res.status().is_success() {
-        return Err(LoginError::HttpResponseFailed(res.status()));
-    }
-
-    if res.status() == StatusCode::NO_CONTENT {
-        return Err(LoginError::NoOAuthConfiguration);
-    }
-
-    let json = res
-        .json::<OAuthConfigResponse>()
-        .map_err(LoginError::HttpError)?;
-
-    let device_auth_url = DeviceAuthorizationUrl::new(json.device_endpoint).map_err(|e| {
-        LoginError::InvalidConfigError(format!("Invalid Authorize Endpoint: {}", e))
-    })?;
-    let client = BasicClient::new(
-        ClientId::new(json.client_id),
-        None,
-        AuthUrl::new(json.authorize_endpoint).map_err(|e| {
-            LoginError::InvalidConfigError(format!("Invalid Authorize Endpoint: {}", e))
-        })?,
-        Some(TokenUrl::new(json.token_endpoint).map_err(|e| {
-            LoginError::InvalidConfigError(format!("Invalid Token Endpoint: {}", e))
-        })?),
-    )
-    .set_device_authorization_url(device_auth_url);
-
-    let details: StandardDeviceAuthorizationResponse = client
-        .exchange_device_code()
-        .map_err(|e| {
-            LoginError::InvalidConfigError(format!("Invalid config for device auth: {}", e))
-        })?
-        .add_scopes(json.scopes.into_iter().map(|s| Scope::new(s)))
-        .request(http_client)
-        .map_err(|e| {
-            LoginError::InvalidConfigError(format!("Failed to get device auth code: {}", e))
-        })?;
-
-    println!(
-        "Open this URL in your browser:\n{}\nand enter the code: {}",
-        details.verification_uri().to_string(),
-        details.user_code().secret().to_string()
-    );
-
-    let token_result = client
-        .exchange_device_access_token(&details)
-        .request(http_client, std::thread::sleep, None)
-        .map_err(|e| {
-            LoginError::InvalidConfigError(format!("Failed to get device auth access token: {}", e))
-        })?;
-
-    let connection = Connection::OAuth {
-        name,
-        server,
-        token: token_result,
-        default,
-        default_acccount_id: Uuid::nil().to_string(),
+        let _cfg = config::save(cfg)?;
+        c
     };
 
-    let config = config::get_configuration()?;
-    config.upsert_connection(connection)?;
-    Ok(())
+    Ok(connection)
 }
