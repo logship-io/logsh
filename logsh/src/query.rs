@@ -63,13 +63,16 @@ pub fn execute_query<W: Write>(command: QueryCommand, mut write: W) -> Result<()
     let connection = cfg
         .get_default_connection()
         .ok_or(anyhow::anyhow!("No logsh connections"))?;
-    let r = connection.1.query_raw(&query).map_err(|err| -> Error {
-        anyhow!("An error occurred during query execution. {err}").context(err)
-    })?;
+    let r = connection
+        .connection
+        .query_raw(&query)
+        .map_err(|err| -> Error {
+            anyhow!("An error occurred during query execution. {err}").context(err)
+        })?;
 
     log::debug!("Response text: {:?}", r);
-    let result = logsh_core::query::result(&r)
-        .map_err(|e| anyhow!("Unable to parse query result. {e}"))?;
+    let result =
+        logsh_core::query::result(&r).map_err(|e| anyhow!("Unable to parse query result. {e}"))?;
     let query_duration = start.elapsed();
     let render_start = Instant::now();
     log::trace!("Finished query execution.");
@@ -164,7 +167,7 @@ fn render_table<W: Write>(
                 let json = row[str].get();
 
                 if let Ok(json) = serde_json::Value::from_str(json) {
-                    if false == is_markdown {
+                    if !is_markdown {
                         match json {
                             serde_json::Value::Null => {
                                 return TableCell::new_with_alignment(

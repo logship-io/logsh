@@ -28,18 +28,16 @@ pub fn execute_subscription(command: ConfigSubscriptionCommand) -> Result<(), Er
             let conn = cfg
                 .get_default_connection()
                 .ok_or(ConfigError::NoDefaultConnection)?;
-            let mut new: Connection = conn.1.clone();
-            match conn.1.subscriptions.get(&name) {
+            let mut new: Connection = conn.connection.clone();
+            match conn.connection.subscriptions.get(&name) {
                 Some(_id) => {
                     new.default_subscription = Some(name);
-                    cfg.connections.insert(conn.0.to_owned(), new);
+                    cfg.connections.insert(conn.name.to_owned(), new);
                     logsh_core::config::save(cfg)?;
-                    return Ok(());
+                    Ok(())
                 }
-                None => {
-                    return Err(anyhow!("Subscription {} does not exist.", name));
-                }
-            };
+                None => Err(anyhow!("Subscription {} does not exist.", name)),
+            }
         }
     }
 }
@@ -56,6 +54,11 @@ pub fn execute_connect(command: ConfigConnectionCommand) -> Result<(), Error> {
             log::trace!("Entering {}.", "add user connection".bright_black().bold());
             let default = default.unwrap_or(true);
             let mut cfg = logsh_core::config::load()?;
+            let server = server
+                .or_else(|| cfg.connections.get(&name).map(|s| s.server.to_owned()))
+                .ok_or(anyhow!(
+                    "Missing required argument \"server\" for new connection."
+                ))?;
             let username = match username {
                 Some(username) => username,
                 None => {
@@ -76,12 +79,6 @@ pub fn execute_connect(command: ConfigConnectionCommand) -> Result<(), Error> {
                 username.clone().yellow()
             );
 
-            let server = server
-                .or_else(|| cfg.connections.get(&name).map(|s| s.server.to_owned()))
-                .ok_or(anyhow!(
-                    "Missing required argument \"server\" for new connection."
-                ))?;
-
             let connection = Connection::new(&server);
             let auth = Some(logsh_core::auth::AuthRequest::Jwt {
                 username: username.clone(),
@@ -90,7 +87,7 @@ pub fn execute_connect(command: ConfigConnectionCommand) -> Result<(), Error> {
                         return Result::<String, AuthError>::Ok(password);
                     }
 
-                    return rpassword::prompt_password(format!(
+                    rpassword::prompt_password(format!(
                         "{} {}{}{} ",
                         "Please enter".cyan(),
                         username.bright_blue().bold(),
@@ -98,7 +95,7 @@ pub fn execute_connect(command: ConfigConnectionCommand) -> Result<(), Error> {
                         ":".cyan(),
                     ))
                     .map_err(logsh_core::error::BasicAuthError::IOError)
-                    .map_err(logsh_core::error::AuthError::BasicAuth);
+                    .map_err(logsh_core::error::AuthError::BasicAuth)
                 },
             });
 
@@ -110,7 +107,7 @@ pub fn execute_connect(command: ConfigConnectionCommand) -> Result<(), Error> {
                         username.yellow(),
                         default.to_string().blue()
                     );
-                    
+
                     if default {
                         cfg.default_connection = name.clone();
                     }
@@ -119,10 +116,8 @@ pub fn execute_connect(command: ConfigConnectionCommand) -> Result<(), Error> {
                     log::info!("Saving new connection.");
                     logsh_core::config::save(cfg)?;
                     Ok(())
-                },
-                Err(err) => {
-                    Err(anyhow!("Error adding connection: {err}"))
                 }
+                Err(err) => Err(anyhow!("Error adding connection: {err}")),
             }
         }
         ConfigConnectionCommand::Add(AddConnectionCommand::OAuth {
@@ -192,7 +187,7 @@ pub fn execute_connect(command: ConfigConnectionCommand) -> Result<(), Error> {
         }
         ConfigConnectionCommand::Default { name } => {
             let mut cfg = config::load()?;
-            if false == cfg.connections.contains_key(&name) {
+            if !cfg.connections.contains_key(&name) {
                 return Err(anyhow!(
                     "Connection \"{name}\" does not exist in configuration."
                 ));
@@ -205,21 +200,39 @@ pub fn execute_connect(command: ConfigConnectionCommand) -> Result<(), Error> {
         ConfigConnectionCommand::Login { name } => {
             let cfg = logsh_core::config::load()?;
             let conn = if let Some(name) = name.as_ref() {
-                cfg.connections.get(name).map(|c| (name, c))
+                cfg.connections.get(name).map(|c| config::ConnectionConfig {
+                    name: name.clone(),
+                    connection: c.clone(),
+                })
             } else {
                 cfg.get_default_connection()
             };
 
             match conn {
-                Some((name, conn)) => {
-                    if conn.is_jwt_auth() {
-                        return execute_connect(ConfigConnectionCommand::Add(AddConnectionCommand::Basic { name: name.to_owned(), server: Some(conn.server.to_owned()), username: Some(conn.username.to_owned()), password: None, default: None }))
-                    } else if conn.is_oauth_auth() {
-                        return execute_connect(ConfigConnectionCommand::Add(AddConnectionCommand::OAuth { name: name.to_owned(), server: None, default: None, flow: OAuthFlow::Device }))
+                Some(connection_config) => {
+                    if connection_config.connection.is_jwt_auth() {
+                        execute_connect(ConfigConnectionCommand::Add(AddConnectionCommand::Basic {
+                            name: connection_config.name.to_owned(),
+                            server: Some(connection_config.connection.server.to_owned()),
+                            username: Some(connection_config.connection.username.to_owned()),
+                            password: None,
+                            default: None,
+                        }))
+                    } else if connection_config.connection.is_oauth_auth() {
+                        return execute_connect(ConfigConnectionCommand::Add(
+                            AddConnectionCommand::OAuth {
+                                name: connection_config.name.to_owned(),
+                                server: None,
+                                default: None,
+                                flow: OAuthFlow::Device,
+                            },
+                        ));
                     } else {
-                        return Err(anyhow!("No authentication scheme defined for this connection."));
+                        return Err(anyhow!(
+                            "No authentication scheme defined for this connection."
+                        ));
                     }
-                },
+                }
                 None => Err(anyhow!("No connection exists with name: {:?}", name)),
             }
         }
@@ -334,7 +347,7 @@ fn list_subscriptions<W: Write>(mut write: W, mode: Option<OutputMode>) -> Resul
     let conn = config
         .get_default_connection()
         .ok_or(ConfigError::NoDefaultConnection)?;
-    let default_sub = conn.1.default_subscription();
+    let default_sub = conn.connection.default_subscription();
 
     match mode.unwrap_or_default() {
         OutputMode::Table | OutputMode::Markdown => {
@@ -350,7 +363,7 @@ fn list_subscriptions<W: Write>(mut write: W, mode: Option<OutputMode>) -> Resul
                 TableCell::new_with_alignment("Default".bright_white().bold(), 1, Alignment::Left),
             ]));
 
-            conn.1.subscriptions.iter().for_each(|f| {
+            conn.connection.subscriptions.iter().for_each(|f| {
                 table.add_row(Row::new(vec![
                     TableCell::new_with_alignment(&f.1.to_string().white(), 1, Alignment::Left),
                     TableCell::new_with_alignment(&f.0.white(), 1, Alignment::Right),
@@ -371,17 +384,17 @@ fn list_subscriptions<W: Write>(mut write: W, mode: Option<OutputMode>) -> Resul
             writeln!(write, "{}", render).map_err(|e| anyhow!("Failed to write output: {}", e))
         }
         OutputMode::Json => {
-            let json = serde_json::to_string(&conn.1.subscriptions)?;
+            let json = serde_json::to_string(&conn.connection.subscriptions)?;
             writeln!(write, "{}", json).map_err(|e| anyhow!("Failed to write json output: {}", e))
         }
         OutputMode::JsonPretty => {
-            let json = serde_json::to_string_pretty(&conn.1.subscriptions)?;
+            let json = serde_json::to_string_pretty(&conn.connection.subscriptions)?;
             writeln!(write, "{}", json)
                 .map_err(|e| anyhow!("Failed to write pretty json output: {}", e))
         }
         OutputMode::Csv => {
             let results = conn
-                .1
+                .connection
                 .subscriptions
                 .iter()
                 .map(|c| {

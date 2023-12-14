@@ -1,10 +1,7 @@
 use std::collections::HashMap;
 
 use colored::Colorize;
-use logsh_core::{
-    config::Configuration,
-    error::ConnectError,
-};
+use logsh_core::{config::Configuration, error::ConnectError};
 use reqwest::StatusCode;
 use serde::Serialize;
 
@@ -34,12 +31,11 @@ pub fn print_connect_error(
         // ConnectError::Config(err) => format_config_error(err),
         ConnectError::NoConnection(str) => {
             println!(
-                "Error: {}{}{}",
+                "Error: {}{}\" exists.",
                 "No connection with name \"".red(),
-                str.yellow().dimmed(),
-                "\" exists."
+                str.yellow().dimmed()
             );
-            println!("{} {} {} ", "# Execute logsh".bright_black(), "", "")
+            println!("{}   ", "# Execute logsh".bright_black())
         }
         ConnectError::Network(err) => match err.status() {
             Some(StatusCode::UNAUTHORIZED) => {
@@ -57,13 +53,17 @@ pub fn print_connect_error(
                 print_add_connection_help();
             }
             Some(code) => {
-                println!("Status: {} {}", format!("HTTP {}", code.as_u16()).yellow(), code.as_str().yellow());
+                println!(
+                    "Status: {} {}",
+                    format!("HTTP {}", code.as_u16()).yellow(),
+                    code.as_str().yellow()
+                );
                 print_add_connection_help();
-            },
+            }
             None => {
                 println!("Status: {}", "Unable to connect".red());
                 print_add_connection_help();
-            },
+            }
         },
         err => {
             println!("Status: {} {}", "Error".red(), err.to_string().bright_red());
@@ -71,7 +71,6 @@ pub fn print_connect_error(
         }
     }
 }
-
 
 pub fn print_add_connection_help() {
     println!(

@@ -85,13 +85,13 @@ pub fn version<W: Write>(mut write: W, command: VersionCommand, level: u8) -> Re
             log::info!("Release Name: {}", latest.name);
             log::info!("Release Date: {}", latest.date);
             match latest.body {
-                Some(body) if body.trim().len() > 0 => {
+                Some(body) if !body.trim().is_empty() => {
                     log::info!("Release Body: {}", body);
                 }
                 _ => {}
             };
 
-            if false == command.yes {
+            if !command.yes {
                 writeln!(
                     write,
                     "Update from version v{} to v{}? [y/n]",
