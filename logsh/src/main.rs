@@ -33,7 +33,11 @@ struct Args {
 }
 
 fn styles() -> Styles {
-    if !std::env::var("NO_COLOR").unwrap_or_default().trim().is_empty() {
+    if !std::env::var("NO_COLOR")
+        .unwrap_or_default()
+        .trim()
+        .is_empty()
+    {
         return Styles::default();
     }
 
@@ -67,7 +71,10 @@ fn main() -> Result<(), Error> {
         _ => log::LevelFilter::Trace,
     };
 
-    let no_color = !std::env::var("NO_COLOR").unwrap_or_default().trim().is_empty();
+    let no_color = !std::env::var("NO_COLOR")
+        .unwrap_or_default()
+        .trim()
+        .is_empty();
     if no_color || cli.no_color {
         colored::control::set_override(false);
     }
@@ -100,7 +107,9 @@ fn main() -> Result<(), Error> {
                                 conn.connection.default_subscription().to_string().blue()
                             );
                         }
-                        Err(err) => fmt::print_connect_error(&cfg, &conn.name, &conn.connection, err),
+                        Err(err) => {
+                            fmt::print_connect_error(&cfg, &conn.name, &conn.connection, err)
+                        }
                     };
                 }
                 None => {

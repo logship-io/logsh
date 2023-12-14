@@ -36,9 +36,7 @@ pub fn execute_subscription(command: ConfigSubscriptionCommand) -> Result<(), Er
                     logsh_core::config::save(cfg)?;
                     Ok(())
                 }
-                None => {
-                    Err(anyhow!("Subscription {} does not exist.", name))
-                }
+                None => Err(anyhow!("Subscription {} does not exist.", name)),
             }
         }
     }
@@ -109,7 +107,7 @@ pub fn execute_connect(command: ConfigConnectionCommand) -> Result<(), Error> {
                         username.yellow(),
                         default.to_string().blue()
                     );
-                    
+
                     if default {
                         cfg.default_connection = name.clone();
                     }
@@ -118,10 +116,8 @@ pub fn execute_connect(command: ConfigConnectionCommand) -> Result<(), Error> {
                     log::info!("Saving new connection.");
                     logsh_core::config::save(cfg)?;
                     Ok(())
-                },
-                Err(err) => {
-                    Err(anyhow!("Error adding connection: {err}"))
                 }
+                Err(err) => Err(anyhow!("Error adding connection: {err}")),
             }
         }
         ConfigConnectionCommand::Add(AddConnectionCommand::OAuth {
@@ -204,7 +200,10 @@ pub fn execute_connect(command: ConfigConnectionCommand) -> Result<(), Error> {
         ConfigConnectionCommand::Login { name } => {
             let cfg = logsh_core::config::load()?;
             let conn = if let Some(name) = name.as_ref() {
-                cfg.connections.get(name).map(|c| config::ConnectionConfig{name: name.clone(), connection: c.clone()})
+                cfg.connections.get(name).map(|c| config::ConnectionConfig {
+                    name: name.clone(),
+                    connection: c.clone(),
+                })
             } else {
                 cfg.get_default_connection()
             };
@@ -212,13 +211,28 @@ pub fn execute_connect(command: ConfigConnectionCommand) -> Result<(), Error> {
             match conn {
                 Some(connection_config) => {
                     if connection_config.connection.is_jwt_auth() {
-                        execute_connect(ConfigConnectionCommand::Add(AddConnectionCommand::Basic { name: connection_config.name.to_owned(), server: Some(connection_config.connection.server.to_owned()), username: Some(connection_config.connection.username.to_owned()), password: None, default: None }))
+                        execute_connect(ConfigConnectionCommand::Add(AddConnectionCommand::Basic {
+                            name: connection_config.name.to_owned(),
+                            server: Some(connection_config.connection.server.to_owned()),
+                            username: Some(connection_config.connection.username.to_owned()),
+                            password: None,
+                            default: None,
+                        }))
                     } else if connection_config.connection.is_oauth_auth() {
-                        return execute_connect(ConfigConnectionCommand::Add(AddConnectionCommand::OAuth { name: connection_config.name.to_owned(), server: None, default: None, flow: OAuthFlow::Device }))
+                        return execute_connect(ConfigConnectionCommand::Add(
+                            AddConnectionCommand::OAuth {
+                                name: connection_config.name.to_owned(),
+                                server: None,
+                                default: None,
+                                flow: OAuthFlow::Device,
+                            },
+                        ));
                     } else {
-                        return Err(anyhow!("No authentication scheme defined for this connection."));
+                        return Err(anyhow!(
+                            "No authentication scheme defined for this connection."
+                        ));
                     }
-                },
+                }
                 None => Err(anyhow!("No connection exists with name: {:?}", name)),
             }
         }
