@@ -4,7 +4,6 @@ on:
     branches: [master]
 
 name: Logsh CLI Build and Publish
-
 jobs:
   build:
     strategy:
