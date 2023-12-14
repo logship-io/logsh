@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 
@@ -8,17 +9,21 @@ use self::oauth::{OAuthData, OAuthFlow};
 pub mod jwt;
 pub mod oauth;
 
-pub type Error = AuthError;
-
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum AuthData {
-    Jwt { token: String },
-    OAuth { data: OAuthData },
+    Jwt {
+        expires: Option<DateTime<Utc>>,
+        token: String
+    },
+    OAuth { 
+        expires: Option<DateTime<Utc>>,
+        data: OAuthData
+    },
 }
 
 pub enum AuthRequest<F>
 where
-    F: FnOnce() -> Result<String, Error>,
+    F: FnOnce() -> Result<String, AuthError>,
 {
     Jwt {
         username: String,
@@ -36,9 +41,9 @@ where
 
 impl<F> AuthRequest<F>
 where
-    F: FnOnce() -> Result<String, Error>,
+    F: FnOnce() -> Result<String, AuthError>,
 {
-    pub fn authenticate(self, client: Client, connection: &Connection) -> Result<AuthData, Error> {
+    pub fn authenticate(self, client: Client, connection: &Connection) -> Result<AuthData, AuthError> {
         match self {
             AuthRequest::Jwt { username, password } => {
                 return jwt::fetch_token(connection, &client, username, password);

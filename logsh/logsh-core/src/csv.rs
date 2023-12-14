@@ -14,7 +14,6 @@ pub enum CsvError {
 
 pub fn write_csv<'a, W: std::io::Write>(
     query: &QueryResult<'a>,
-    _color: bool,
     to: W,
 ) -> Result<(), CsvError> {
     let mut wtr = csv::Writer::from_writer(to);

@@ -19,17 +19,19 @@ pub enum ConfigCommand {
     },
     #[clap(subcommand)]
     Connection(ConfigConnectionCommand),
+    #[clap(subcommand)]
+    Subscription(ConfigSubscriptionCommand),
 }
 
 #[derive(Subcommand)]
-#[clap(about = "Add a connection")]
+#[clap(about = "Add or update a connection")]
 pub enum AddConnectionCommand {
     #[clap(visible_aliases = ["u", "user"], about = "Add a basic auth connection")]
     Basic {
         #[arg(help = "Connection name.")]
         name: String,
         #[arg(help = "Server Endpoint.")]
-        server: String,
+        server: Option<String>,
         #[arg(short, long, help = "Username.")]
         username: Option<String>,
         #[arg(short, long, help = "Password.")]
@@ -42,7 +44,7 @@ pub enum AddConnectionCommand {
         #[arg(help = "Connection name.")]
         name: String,
         #[arg(help = "Server Endpoint.")]
-        server: String,
+        server: Option<String>,
         #[arg(
             long,
             help = "Set the new connection as default.",
@@ -66,6 +68,11 @@ pub enum OAuthFlow {
 pub enum ConfigConnectionCommand {
     #[clap(subcommand)]
     Add(AddConnectionCommand),
+    #[clap(about = "Authenticate an existing connection")]
+    Login {
+        #[arg(help = "Connection name.")]
+        name: Option<String>,
+    },
     #[clap(visible_alias = "ls", about = "List connections")]
     List {
         #[arg(short, long, help = "Output result format")]
@@ -79,6 +86,21 @@ pub enum ConfigConnectionCommand {
     #[clap(visible_alias = "d", about = "Set the default logsh connection")]
     Default {
         #[arg(help = "Connection name.")]
+        name: String,
+    },
+}
+
+#[derive(Subcommand)]
+#[clap(visible_aliases = ["s", "sub"], about = "Configure logsh subscriptions.")]
+pub enum ConfigSubscriptionCommand {
+    #[clap(visible_alias = "ls", about = "List subscriptions.")]
+    List {
+        #[arg(short, long, help = "Output result format")]
+        output: Option<OutputMode>,
+    },
+    #[clap(visible_alias = "d", about = "Set the default user subscription.")]
+    Default {
+        #[arg(help = "Subscription name.")]
         name: String,
     },
 }
@@ -130,5 +152,6 @@ pub(crate) fn execute_config(command: ConfigCommand) -> Result<(), anyhow::Error
         }
 
         ConfigCommand::Connection(command) => connect::execute_connect(command),
+        ConfigCommand::Subscription(command) => connect::execute_subscription(command),
     }
 }

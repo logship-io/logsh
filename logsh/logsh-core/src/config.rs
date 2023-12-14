@@ -15,13 +15,21 @@ pub struct Configuration {
     pub connections: HashMap<String, Connection>,
 }
 
+
+
 impl Configuration {
-    pub fn get_default_connection(&self) -> Option<Connection> {
+    pub fn get_default_connection(&self) -> Option<(&String, &Connection)> {
         if let Some(c) = self.connections.get(&self.default_connection) {
-            return Some(c.clone());
+            return Some((&self.default_connection, c));
         }
 
-        self.connections.values().into_iter().next().cloned()
+        
+        let conn = self.connections.iter().next();
+        if let Some((name, _conn)) = conn {
+            log::warn!("Default connection \"{}\" does not exist. Updating to \"{}\".", &self.default_connection, name);
+        }
+
+        conn
     }
 }
 

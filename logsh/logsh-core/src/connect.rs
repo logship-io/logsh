@@ -4,7 +4,7 @@ use reqwest::StatusCode;
 use reqwest::blocking::RequestBuilder;
 use reqwest::header::{HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::fmt;
 
 use crate::auth::{AuthData, AuthRequest};
@@ -17,9 +17,26 @@ pub struct Connection {
     pub server: String,
     pub user: Option<uuid::Uuid>,
     pub username: String,
-    pub default_subscription: Option<uuid::Uuid>,
-    pub subscriptions: HashSet<uuid::Uuid>,
+    pub default_subscription: Option<String>,
+    pub subscriptions: HashMap<String, uuid::Uuid>,
     auth: Option<AuthData>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy)]
+pub enum ConnectionStatus {
+    Connected,
+    AuthRequired,
+    NotConfigured,
+}
+
+impl fmt::Display for ConnectionStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", match self {
+            ConnectionStatus::Connected => "Connected",
+            ConnectionStatus::AuthRequired => "Authentication Required",
+            ConnectionStatus::NotConfigured => "Configuration Required",
+        })
+    }
 }
 
 impl fmt::Display for Connection {
@@ -37,8 +54,8 @@ impl fmt::Display for Connection {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UserModel {
-    user_id: uuid::Uuid,
-    user_name: String,
+    pub user_id: uuid::Uuid,
+    pub user_name: String,
     /*
      * first_name: String,
      * last_name: String,
@@ -62,7 +79,7 @@ impl Connection {
             user: None,
             username: String::default(),
             default_subscription: None,
-            subscriptions: HashSet::default(),
+            subscriptions: HashMap::default(),
             auth: None,
         }
     }
@@ -70,15 +87,31 @@ impl Connection {
     pub fn default_subscription(&self) -> uuid::Uuid {
         self.default_subscription
             .as_ref()
-            .or_else(|| self.subscriptions.iter().nth(0))
+            .map(|d| self.subscriptions.get(d))
+            .flatten()
+            .or_else(|| self.subscriptions.iter().nth(0).map(|s| s.1))
             .map(|u| u.clone())
             .unwrap_or_else(uuid::Uuid::default)
     }
 
+    pub fn is_jwt_auth(&self) -> bool {
+        match self.auth {
+            Some(AuthData::Jwt { expires: _, token: _ }) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_oauth_auth(&self) -> bool {
+        match self.auth {
+            Some(AuthData::OAuth { expires: _, data: _ }) => true,
+            _ => false,
+        }
+    }
+
     pub fn authenticate_request(&self, builder: RequestBuilder) -> RequestBuilder {
         match &self.auth {
-            Some(AuthData::Jwt { token }) => builder.bearer_auth(token),
-            Some(AuthData::OAuth { data }) => {
+            Some(AuthData::Jwt { expires: _, token }) => builder.bearer_auth(token),
+            Some(AuthData::OAuth { expires: _, data }) => {
                 builder.bearer_auth(data.token.access_token().secret())
             }
             None => builder,
@@ -115,6 +148,19 @@ impl Connection {
         Ok(response)
     }
 
+    pub fn subscriptions(&self, user: uuid::Uuid) -> Result<Vec<SubscriptionsModel>, ConnectError> {
+        log::debug!("Executing accounts query");
+        let client = client_builder().build()?;
+        let response: Vec<SubscriptionsModel> = self
+            .authenticate_request(
+                client.get(format!("{}/users/{}/accounts", &self.server.trim_end_matches('/'), user)),
+            )
+            .send()?
+            .error_for_status()?
+            .json()?;
+        Ok(response)
+    }
+
     pub fn refresh_auth<F>(&mut self, auth: Option<AuthRequest<F>>) -> Result<(), ConnectError>
     where
         F: FnOnce() -> Result<String, AuthError>,
@@ -126,8 +172,8 @@ impl Connection {
                 return Err(ConnectError::NoAuthentication);
             }
             (Some(a), None) => match a {
-                AuthData::Jwt { token: _ } => return Err(ConnectError::Auth(AuthError::Expired)),
-                AuthData::OAuth { data } => {
+                AuthData::Jwt { expires: _, token: _ } => return Err(ConnectError::Auth(AuthError::Expired)),
+                AuthData::OAuth { expires: _, data } => {
                     if let Some(expires_in) = data.token.expires_in() {
                         let expiry = data.received
                             .checked_add_signed(Duration::seconds(expires_in.as_secs() as i64))
@@ -185,6 +231,15 @@ pub struct OAuthConfigResponse {
     pub scopes: Vec<String>,
 }
 
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubscriptionsModel {
+    pub permissions: Vec<String>,
+    pub account_id: uuid::Uuid,
+    pub account_name: String,
+}
+
+
 static USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"),);
 
 fn client_builder() -> reqwest::blocking::ClientBuilder {
@@ -214,8 +269,13 @@ where
         let c = if let Some(c) = connection.as_mut() {
             c.refresh_auth(auth)?;
             let user = c.who_am_i()?;
+            let mut subs = c.subscriptions(user.user_id)?;
+            subs.sort_by(|a, b| a.account_name.cmp(&b.account_name));
             c.user = Some(user.user_id);
             c.username = user.user_name;
+            c.subscriptions = subs.into_iter()
+                .map(|s| (s.account_name, s.account_id))
+                .collect();
             Ok(c.clone())
         } else {
             match conn_entry {
@@ -223,8 +283,13 @@ where
                     let c = o.get_mut();
                     c.refresh_auth(auth)?;
                     let user = c.who_am_i()?;
+                    let mut subs = c.subscriptions(user.user_id)?;
+                    subs.sort_by(|a, b| a.account_name.cmp(&b.account_name));
                     c.user = Some(user.user_id);
                     c.username = user.user_name;
+                    c.subscriptions = subs.into_iter()
+                        .map(|s| (s.account_name, s.account_id))
+                        .collect();
                     Ok(c.clone())
                 },
                 std::collections::hash_map::Entry::Vacant(_) => {

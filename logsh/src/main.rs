@@ -9,6 +9,7 @@ use clap::{
     },
     command, Parser, Subcommand, ValueEnum,
 };
+use colored::Colorize;
 
 mod config;
 mod connect;
@@ -19,13 +20,16 @@ mod version;
 
 #[derive(Parser)]
 #[clap(name = "logsh", author = "logship.llc", styles = styles())]
-#[command(arg_required_else_help = true)]
+#[command(arg_required_else_help = false)]
 struct Args {
     #[command(subcommand)]
     command: Option<Commands>,
 
     #[arg(short = 'v', action = clap::ArgAction::Count, global = true, help = "Set command verbosity. The more 'v's, the more verbose. -vvvv is the most verbose.")]
     verbose: u8,
+
+    #[arg(long, global = true, help = "Disable global color output.")]
+    no_color: bool,
 }
 
 fn styles() -> Styles {
@@ -64,15 +68,15 @@ fn main() -> Result<(), Error> {
     };
 
     let no_color = std::env::var("NO_COLOR").unwrap_or_default().trim().len() > 0;
-    if no_color {
+    if no_color || cli.no_color {
         colored::control::set_override(false);
     }
-    
+
     pretty_env_logger::formatted_builder()
         .filter_level(log_level)
         .init();
 
-    let result = match cli.command {
+    match cli.command {
         Some(Commands::Connection(command)) => crate::connect::execute_connect(command),
         Some(Commands::Query(command)) => crate::query::execute_query(command, std::io::stdout()),
         Some(Commands::Upload(command)) => crate::upload::execute_upload(command),
@@ -80,14 +84,44 @@ fn main() -> Result<(), Error> {
             crate::version::version(std::io::stdout(), command, cli.verbose)
         }
         Some(Commands::Config(command)) => crate::config::execute_config(command),
-        None => Err(anyhow::anyhow!("No command provided.")),
-    };
+        None => {
+            log::debug!("No arguments provided. Output status.");
+            let cfg = logsh_core::config::load()?;
+            let conn = cfg.get_default_connection();
+            match conn {
+                Some(conn) => {
+                    match conn.1.who_am_i() {
+                        Ok(user) => {
+                            println!("Status: {}", "Connected".green());
+                            println!(
+                                "Logged into connection {} as user {} with subscription: {}",
+                                &conn.0.blue(),
+                                &user.user_name.blue(),
+                                conn.1.default_subscription().to_string().blue()
+                            );
+                        }
+                        Err(err) => fmt::print_connect_error(&cfg, conn.0, conn.1, err),
+                    };
+                }
+                None => {
+                    println!(
+                        "Status: {} {}",
+                        "Missing default connection.".red(),
+                        "Configuration Required.".red()
+                    );
+                    fmt::print_add_connection_help();
+                }
+            }
 
-    if let Err(err) = result {
-        return Err(anyhow!("Command failed: {}", err));
+            println!(
+                "{} {} {}",
+                "# Execute".bright_black(),
+                "logsh --help".blue(),
+                "to view available commands.".bright_black()
+            );
+            Ok(())
+        }
     }
-
-    Ok(())
 }
 
 #[derive(Copy, Clone, Debug, Default, ValueEnum)]

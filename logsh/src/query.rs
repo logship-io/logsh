@@ -63,12 +63,13 @@ pub fn execute_query<W: Write>(command: QueryCommand, mut write: W) -> Result<()
     let connection = cfg
         .get_default_connection()
         .ok_or(anyhow::anyhow!("No logsh connections"))?;
-    let r = connection.query_raw(&query)
-        .map_err(|err| -> Error { anyhow!("An error occurred during query execution. {err}").context(err) })?;
+    let r = connection.1.query_raw(&query).map_err(|err| -> Error {
+        anyhow!("An error occurred during query execution. {err}").context(err)
+    })?;
 
     log::debug!("Response text: {:?}", r);
     let result = logsh_core::query::result(&r)
-        .map_err(|e| anyhow!("Unable to parse query result. Maybe try re-authenticating? {e}"))?;
+        .map_err(|e| anyhow!("Unable to parse query result. {e}"))?;
     let query_duration = start.elapsed();
     let render_start = Instant::now();
     log::trace!("Finished query execution.");
@@ -94,7 +95,7 @@ pub fn execute_query<W: Write>(command: QueryCommand, mut write: W) -> Result<()
         }
         OutputMode::Csv => {
             log::trace!("Outputting CSV");
-            logsh_core::csv::write_csv(&result, true, write)
+            logsh_core::csv::write_csv(&result, write)
                 .map_err(|e| anyhow!("Failed to convert to CSV: {}", e))
         }
     }?;
@@ -162,14 +163,29 @@ fn render_table<W: Write>(
                 let str = header.as_str();
                 let json = row[str].get();
 
-                if let Ok(json) = serde_json::Value::from_str(json)
-                {
+                if let Ok(json) = serde_json::Value::from_str(json) {
                     if false == is_markdown {
                         match json {
-                            serde_json::Value::Null => return TableCell::new_with_alignment("<null>".bright_black(), 1, Alignment::Center),
-                            serde_json::Value::Bool(b) => return TableCell::new_with_alignment(if b { "true".green() } else { "false".red() }, 1, Alignment::Center),
-                            serde_json::Value::Number(n) => return TableCell::new_with_alignment(n, 1, Alignment::Left),
-                            serde_json::Value::String(s) => return TableCell::new_with_alignment(s, 1, Alignment::Center),
+                            serde_json::Value::Null => {
+                                return TableCell::new_with_alignment(
+                                    "<null>".bright_black(),
+                                    1,
+                                    Alignment::Center,
+                                )
+                            }
+                            serde_json::Value::Bool(b) => {
+                                return TableCell::new_with_alignment(
+                                    if b { "true".green() } else { "false".red() },
+                                    1,
+                                    Alignment::Center,
+                                )
+                            }
+                            serde_json::Value::Number(n) => {
+                                return TableCell::new_with_alignment(n, 1, Alignment::Left)
+                            }
+                            serde_json::Value::String(s) => {
+                                return TableCell::new_with_alignment(s, 1, Alignment::Center)
+                            }
                             _ => { /* noop */ }
                         }
                     }
@@ -177,10 +193,10 @@ fn render_table<W: Write>(
                     if let Ok(serialized) = serde_json::to_string_pretty(&json) {
                         return TableCell::new_with_alignment(serialized, 1, Alignment::Center);
                     }
-                } 
+                }
 
                 TableCell::new_with_alignment(json, 1, Alignment::Center)
-            },
+            }
         });
 
         let mut row = Row::new(cells);
