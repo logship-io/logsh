@@ -33,7 +33,7 @@ struct Args {
 }
 
 fn styles() -> Styles {
-    if std::env::var("NO_COLOR").unwrap_or_default().trim().len() > 0 {
+    if !std::env::var("NO_COLOR").unwrap_or_default().trim().is_empty() {
         return Styles::default();
     }
 
@@ -90,17 +90,17 @@ fn main() -> Result<(), Error> {
             let conn = cfg.get_default_connection();
             match conn {
                 Some(conn) => {
-                    match conn.1.who_am_i() {
+                    match conn.connection.who_am_i() {
                         Ok(user) => {
                             println!("Status: {}", "Connected".green());
                             println!(
                                 "Logged into connection {} as user {} with subscription: {}",
-                                &conn.0.blue(),
+                                &conn.name.blue(),
                                 &user.user_name.blue(),
-                                conn.1.default_subscription().to_string().blue()
+                                conn.connection.default_subscription().to_string().blue()
                             );
                         }
-                        Err(err) => fmt::print_connect_error(&cfg, conn.0, conn.1, err),
+                        Err(err) => fmt::print_connect_error(&cfg, &conn.name, &conn.connection, err),
                     };
                 }
                 None => {

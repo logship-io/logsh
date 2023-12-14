@@ -63,7 +63,7 @@ pub fn execute_query<W: Write>(command: QueryCommand, mut write: W) -> Result<()
     let connection = cfg
         .get_default_connection()
         .ok_or(anyhow::anyhow!("No logsh connections"))?;
-    let r = connection.1.query_raw(&query).map_err(|err| -> Error {
+    let r = connection.connection.query_raw(&query).map_err(|err| -> Error {
         anyhow!("An error occurred during query execution. {err}").context(err)
     })?;
 
