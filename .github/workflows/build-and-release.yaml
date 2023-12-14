@@ -20,7 +20,7 @@ jobs:
       - name: Inject Tag Version
         shell: pwsh
         run: |
-          $Env:GIT_VERSION = $Env:GITHUB_REF -replace 'refs/.*/v', ''
+          $Env:GIT_VERSION = $(git describe --tags) -replace 'v', ''
           (Get-Content ./logsh/Cargo.toml) -replace '^version\s+=\s+"([0-9\.]+)"\s*$', "version = `"$($Env:GIT_VERSION)`"" | Out-File ./logsh/Cargo.toml
           echo "Version should be $($Env:GIT_VERSION)"
           echo "----------------------------------------"
