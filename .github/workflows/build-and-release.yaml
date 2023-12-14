@@ -1,7 +1,7 @@
 on:
   push:
-    tags: ['v[0-9].[0-9]+.[0-9]+']
-    branches: [master]
+    tags:
+      - 'v*.*.*'
 
 name: Logsh CLI Build and Publish
 jobs:
@@ -19,7 +19,8 @@ jobs:
       - name: Inject Tag Version
         shell: pwsh
         run: |
-          $Env:GIT_VERSION = $(git describe --tags) -replace 'v', ''
+          $Env:GIT_VERSION = "${{ github.ref_name }}" -replace 'v', ''
+          echo "Verion is $Env:GIT_VERSION"
           (Get-Content ./logsh/Cargo.toml) -replace '^version\s+=\s+"([0-9\.]+)"\s*$', "version = `"$($Env:GIT_VERSION)`"" | Out-File ./logsh/Cargo.toml
           echo "Version should be $($Env:GIT_VERSION)"
           echo "----------------------------------------"
