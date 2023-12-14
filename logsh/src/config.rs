@@ -130,7 +130,7 @@ pub(crate) fn execute_config(command: ConfigCommand) -> Result<(), anyhow::Error
                     config::get_configuration_path()
                         .map_err(|err| anyhow!("Failed to read configuration path: {err}")),
                 )?;
-            if exists && false == path.exists() {
+            if exists && !path.exists() {
                 return Err(anyhow!(
                     "logsh configuration does not exist at path: {}",
                     path.to_string_lossy()

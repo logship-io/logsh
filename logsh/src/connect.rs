@@ -34,12 +34,12 @@ pub fn execute_subscription(command: ConfigSubscriptionCommand) -> Result<(), Er
                     new.default_subscription = Some(name);
                     cfg.connections.insert(conn.name.to_owned(), new);
                     logsh_core::config::save(cfg)?;
-                    return Ok(());
+                    Ok(())
                 }
                 None => {
-                    return Err(anyhow!("Subscription {} does not exist.", name));
+                    Err(anyhow!("Subscription {} does not exist.", name))
                 }
-            };
+            }
         }
     }
 }
@@ -89,7 +89,7 @@ pub fn execute_connect(command: ConfigConnectionCommand) -> Result<(), Error> {
                         return Result::<String, AuthError>::Ok(password);
                     }
 
-                    return rpassword::prompt_password(format!(
+                    rpassword::prompt_password(format!(
                         "{} {}{}{} ",
                         "Please enter".cyan(),
                         username.bright_blue().bold(),
@@ -97,7 +97,7 @@ pub fn execute_connect(command: ConfigConnectionCommand) -> Result<(), Error> {
                         ":".cyan(),
                     ))
                     .map_err(logsh_core::error::BasicAuthError::IOError)
-                    .map_err(logsh_core::error::AuthError::BasicAuth);
+                    .map_err(logsh_core::error::AuthError::BasicAuth)
                 },
             });
 
@@ -191,7 +191,7 @@ pub fn execute_connect(command: ConfigConnectionCommand) -> Result<(), Error> {
         }
         ConfigConnectionCommand::Default { name } => {
             let mut cfg = config::load()?;
-            if false == cfg.connections.contains_key(&name) {
+            if !cfg.connections.contains_key(&name) {
                 return Err(anyhow!(
                     "Connection \"{name}\" does not exist in configuration."
                 ));
@@ -212,7 +212,7 @@ pub fn execute_connect(command: ConfigConnectionCommand) -> Result<(), Error> {
             match conn {
                 Some(connection_config) => {
                     if connection_config.connection.is_jwt_auth() {
-                        return execute_connect(ConfigConnectionCommand::Add(AddConnectionCommand::Basic { name: connection_config.name.to_owned(), server: Some(connection_config.connection.server.to_owned()), username: Some(connection_config.connection.username.to_owned()), password: None, default: None }))
+                        execute_connect(ConfigConnectionCommand::Add(AddConnectionCommand::Basic { name: connection_config.name.to_owned(), server: Some(connection_config.connection.server.to_owned()), username: Some(connection_config.connection.username.to_owned()), password: None, default: None }))
                     } else if connection_config.connection.is_oauth_auth() {
                         return execute_connect(ConfigConnectionCommand::Add(AddConnectionCommand::OAuth { name: connection_config.name.to_owned(), server: None, default: None, flow: OAuthFlow::Device }))
                     } else {

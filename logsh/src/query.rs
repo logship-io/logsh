@@ -164,7 +164,7 @@ fn render_table<W: Write>(
                 let json = row[str].get();
 
                 if let Ok(json) = serde_json::Value::from_str(json) {
-                    if false == is_markdown {
+                    if !is_markdown {
                         match json {
                             serde_json::Value::Null => {
                                 return TableCell::new_with_alignment(

@@ -34,12 +34,11 @@ pub fn print_connect_error(
         // ConnectError::Config(err) => format_config_error(err),
         ConnectError::NoConnection(str) => {
             println!(
-                "Error: {}{}{}",
+                "Error: {}{}\" exists.",
                 "No connection with name \"".red(),
-                str.yellow().dimmed(),
-                "\" exists."
+                str.yellow().dimmed()
             );
-            println!("{} {} {} ", "# Execute logsh".bright_black(), "", "")
+            println!("{}   ", "# Execute logsh".bright_black())
         }
         ConnectError::Network(err) => match err.status() {
             Some(StatusCode::UNAUTHORIZED) => {

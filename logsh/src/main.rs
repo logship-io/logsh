@@ -67,7 +67,7 @@ fn main() -> Result<(), Error> {
         _ => log::LevelFilter::Trace,
     };
 
-    let no_color = std::env::var("NO_COLOR").unwrap_or_default().trim().len() > 0;
+    let no_color = !std::env::var("NO_COLOR").unwrap_or_default().trim().is_empty();
     if no_color || cli.no_color {
         colored::control::set_override(false);
     }
