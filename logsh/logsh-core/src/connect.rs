@@ -89,7 +89,7 @@ impl Connection {
             .as_ref()
             .map(|d| self.subscriptions.get(d))
             .flatten()
-            .or_else(|| self.subscriptions.iter().nth(0).map(|s| s.1))
+            .or_else(|| self.subscriptions.iter().min().map(|s| s.1))
             .map(|u| u.clone())
             .unwrap_or_else(uuid::Uuid::default)
     }
