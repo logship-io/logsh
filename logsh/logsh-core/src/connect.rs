@@ -213,7 +213,7 @@ impl Connection {
         };
 
         let sub = &self.default_subscription()
-            .ok_or(QueryError::Config(ConfigError::NoDefaultConnection))?;
+            .ok_or(QueryError::Config(ConfigError::NoDefaultSubscription))?;
         let client = client_builder().build()?;
         let response = self
             .authenticate_request(client.post(format!(

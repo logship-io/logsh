@@ -168,7 +168,7 @@ fn push_records(
         serde_json::to_writer(&mut encoder, &records).unwrap();
         let result = encoder.finish().unwrap();
         let sub = &connection.default_subscription()
-            .ok_or(UploadError::Config(crate::error::ConfigError::NoDefaultConnection))?;
+            .ok_or(UploadError::Config(crate::error::ConfigError::NoDefaultSubscription))?;
 
         debug!("GZIP length: {}", result.len());
         match connection
