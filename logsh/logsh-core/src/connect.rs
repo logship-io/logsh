@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use crate::auth::{AuthData, AuthRequest};
-use crate::error::{AuthError, ConnectError, OAuthError, QueryError};
+use crate::error::{AuthError, ConnectError, OAuthError, QueryError, ConfigError};
 use crate::config;
 use crate::query::QueryRequest;
 
@@ -43,7 +43,7 @@ impl fmt::Display for Connection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "Server: {}; User: {}; Default Subscription: {}",
+            "Server: {}; User: {}; Default Subscription: {:?}",
             self.server,
             self.user.unwrap_or_default(),
             self.default_subscription()
@@ -84,14 +84,20 @@ impl Connection {
         }
     }
 
-    pub fn default_subscription(&self) -> uuid::Uuid {
-        self.default_subscription
-            .as_ref()
-            .map(|d| self.subscriptions.get(d))
-            .flatten()
-            .or_else(|| self.subscriptions.iter().min().map(|s| s.1))
-            .map(|u| u.clone())
-            .unwrap_or_else(uuid::Uuid::default)
+    pub fn default_subscription(&self) -> Option<uuid::Uuid> {
+        if let Some(d) = self.default_subscription.as_ref() {
+            if let Some(sub) = self.subscriptions.get(d) {
+                return Some(sub.to_owned());
+            }
+        }
+
+        let mut subs = Vec::from_iter(self.subscriptions.iter());
+        subs.sort_by_key(|s| s.0);
+        if subs.len() > 0 {
+            return Some(subs[0].1.to_owned());
+        }
+
+        None
     }
 
     pub fn is_jwt_auth(&self) -> bool {
@@ -206,12 +212,14 @@ impl Connection {
             variables: &[],
         };
 
+        let sub = &self.default_subscription()
+            .ok_or(QueryError::Config(ConfigError::NoDefaultConnection))?;
         let client = client_builder().build()?;
         let response = self
             .authenticate_request(client.post(format!(
                 "{}/search/{}/kusto",
                 &self.server.trim_end_matches('/'),
-                &self.default_subscription()
+                sub
             )))
             .json(&req)
             .send()?

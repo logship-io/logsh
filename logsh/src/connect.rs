@@ -368,11 +368,11 @@ fn list_subscriptions<W: Write>(mut write: W, mode: Option<OutputMode>) -> Resul
                     TableCell::new_with_alignment(&f.1.to_string().white(), 1, Alignment::Left),
                     TableCell::new_with_alignment(&f.0.white(), 1, Alignment::Right),
                     TableCell::new_with_alignment(
-                        if default_sub == *f.1 {
-                            "true".green()
-                        } else {
-                            "false".red()
-                        },
+                        serde_json::Value::String(if default_sub.map_or(false, |s| &s == f.1) {
+                                "true".to_owned()
+                            } else {
+                                "false".to_owned()
+                            }),
                         1,
                         Alignment::Left,
                     ),
@@ -406,7 +406,7 @@ fn list_subscriptions<W: Write>(mut write: W, mode: Option<OutputMode>) -> Resul
                         ("Id".to_string(), serde_json::Value::String(c.0.to_string())),
                         (
                             "Default".to_string(),
-                            serde_json::Value::String(if *c.1 == default_sub {
+                            serde_json::Value::String(if default_sub.map_or(false, |s| s == *c.1) {
                                 "true".to_owned()
                             } else {
                                 "false".to_owned()

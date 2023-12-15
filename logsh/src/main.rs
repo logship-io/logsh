@@ -99,12 +99,13 @@ fn main() -> Result<(), Error> {
                 Some(conn) => {
                     match conn.connection.who_am_i() {
                         Ok(user) => {
+                            let sub = conn.connection.default_subscription().map_or("None".to_string(), |s| s.to_string());
                             println!("Status: {}", "Connected".green());
                             println!(
                                 "Logged into connection {} as user {} with subscription: {}",
                                 &conn.name.blue(),
                                 &user.user_name.blue(),
-                                conn.connection.default_subscription().to_string().blue()
+                                sub.blue()
                             );
                         }
                         Err(err) => {

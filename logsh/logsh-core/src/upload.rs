@@ -167,12 +167,15 @@ fn push_records(
         let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
         serde_json::to_writer(&mut encoder, &records).unwrap();
         let result = encoder.finish().unwrap();
+        let sub = &connection.default_subscription()
+            .ok_or(UploadError::Config(crate::error::ConfigError::NoDefaultConnection))?;
+
         debug!("GZIP length: {}", result.len());
         match connection
             .authenticate_request(client.post(format!(
                 "{}/inflow/{}",
                 &connection.server,
-                connection.default_subscription()
+                sub
             )))
             .body(result)
             .header("content-type", "application/json")
