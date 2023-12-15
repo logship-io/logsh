@@ -241,16 +241,14 @@ pub fn execute_connect(command: ConfigConnectionCommand) -> Result<(), Error> {
 
 fn list<W: Write>(mut write: W, mode: Option<OutputMode>) -> Result<(), Error> {
     let config = logsh_core::config::load()?;
-    let list: Vec<_> = config
-        .connections
-        .into_iter()
-        .map(|c| crate::fmt::Connection {
+    let mut list: Vec<_> = Vec::from_iter(config.connections);
+    list.sort_by_key(|c| c.0.to_owned());
+    let list: Vec<_> = list.iter().map(|c| crate::fmt::Connection {
             name: c.0.to_string(),
             server: c.1.server.to_string(),
             is_default: c.0 == config.default_connection,
             username: c.1.username.to_string(),
-        })
-        .collect();
+        }).collect();
 
     match mode.unwrap_or_default() {
         OutputMode::Table | OutputMode::Markdown => {
@@ -347,8 +345,10 @@ fn list_subscriptions<W: Write>(mut write: W, mode: Option<OutputMode>) -> Resul
     let conn = config
         .get_default_connection()
         .ok_or(ConfigError::NoDefaultConnection)?;
-    let default_sub = conn.connection.default_subscription();
 
+    let default_sub = conn.connection.default_subscription();
+    let mut subs = Vec::from_iter(conn.connection.subscriptions.iter());
+    subs.sort_by_key(|s| s.0);
     match mode.unwrap_or_default() {
         OutputMode::Table | OutputMode::Markdown => {
             let mut table = Table::new();
@@ -363,7 +363,7 @@ fn list_subscriptions<W: Write>(mut write: W, mode: Option<OutputMode>) -> Resul
                 TableCell::new_with_alignment("Default".bright_white().bold(), 1, Alignment::Left),
             ]));
 
-            conn.connection.subscriptions.iter().for_each(|f| {
+            subs.iter().for_each(|f| {
                 table.add_row(Row::new(vec![
                     TableCell::new_with_alignment(&f.1.to_string().white(), 1, Alignment::Left),
                     TableCell::new_with_alignment(&f.0.white(), 1, Alignment::Right),
@@ -393,9 +393,7 @@ fn list_subscriptions<W: Write>(mut write: W, mode: Option<OutputMode>) -> Resul
                 .map_err(|e| anyhow!("Failed to write pretty json output: {}", e))
         }
         OutputMode::Csv => {
-            let results = conn
-                .connection
-                .subscriptions
+            let results = subs
                 .iter()
                 .map(|c| {
                     HashMap::from([
