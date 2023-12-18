@@ -222,10 +222,19 @@ impl Connection {
                 sub
             )))
             .json(&req)
-            .send()?
-            .error_for_status()?
-            .text()?;
-        Ok(response)
+            .send()?;
+        if response.status().is_success() {
+            return Ok(response.text()?);
+        }
+        else if response.status().is_client_error() | response.status().is_informational() {
+            return Err(QueryError::BadRequest(
+                response.text()?,
+            ));
+        }
+        else {
+            response.error_for_status()?;
+            return Err(QueryError::BadRequest("Query failed with unknown error.".to_string()));
+        }
     }
 }
 

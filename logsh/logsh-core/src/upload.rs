@@ -3,8 +3,6 @@ use std::{
     path::Path,
 };
 
-use reqwest::blocking::Body;
-
 use crate::{
     connect::Connection,
     error::{CommonError, UploadError},

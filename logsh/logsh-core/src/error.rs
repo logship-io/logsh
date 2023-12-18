@@ -91,6 +91,9 @@ pub enum QueryError {
 
     #[error("JSON Error: {0}")]
     Json(#[from] serde_json::Error),
+
+    #[error("Bad request: {0}")]
+    BadRequest(String),
 }
 
 #[derive(Debug, Error)]
