@@ -7,7 +7,10 @@ use std::{
 use anyhow::{anyhow, Error};
 use clap::arg;
 use colored::Colorize;
-use logsh_core::config;
+use logsh_core::{
+    config,
+    query::{ErrorMessage, ErrorToken},
+};
 use term_table::{
     row::Row,
     table_cell::{Alignment, TableCell},
@@ -15,6 +18,7 @@ use term_table::{
 };
 
 use crate::OutputMode;
+use annotate_snippets::{Annotation, AnnotationType, Renderer, Slice, Snippet, SourceAnnotation};
 
 pub fn markdown_style() -> TableStyle {
     let mut style: TableStyle = TableStyle::simple();
@@ -43,6 +47,14 @@ pub struct QueryCommand {
     output: Option<OutputMode>,
 }
 
+fn to_source_annotation<'a>(msg: &'a ErrorMessage, e: &'a ErrorToken) -> SourceAnnotation<'a> {
+    SourceAnnotation {
+        label: msg.message.as_ref().unwrap().as_str(),
+        annotation_type: AnnotationType::Error,
+        range: (e.start as usize + 1, e.end as usize + 1),
+    }
+}
+
 pub fn execute_query<W: Write>(command: QueryCommand, mut write: W) -> Result<(), Error> {
     log::debug!("Entering query execution: {:?}", &command);
     let start = Instant::now();
@@ -67,7 +79,39 @@ pub fn execute_query<W: Write>(command: QueryCommand, mut write: W) -> Result<()
         .connection
         .query_raw(&query)
         .map_err(|err| -> Error {
-            anyhow!("An error occurred during query execution. {err}").context(err)
+            match err {
+                logsh_core::error::QueryError::BadRequest(bad_request) => {
+                    let mut annotations = Vec::new();
+                    for e in bad_request.errors.iter() {
+                        for t in e.tokens.iter() {
+                            let annotation = to_source_annotation(e, t);
+                            annotations.push(annotation);
+                        }
+                    }
+
+                    let snippy = Snippet {
+                        title: Some(Annotation {
+                            label: Some(bad_request.message.as_str()),
+                            id: None,
+                            annotation_type: AnnotationType::Error,
+                        }),
+                        footer: vec![],
+                        slices: vec![Slice {
+                            source: query.as_str(),
+                            line_start: 0,
+                            origin: None,
+                            fold: true,
+                            annotations,
+                        }],
+                    };
+
+                    let renderer = Renderer::styled();
+                    println!("{}", renderer.render(snippy));
+
+                    anyhow!("An error occurred during query execution.")
+                }
+                _ => anyhow!("An error occurred during query execution. {err}").context(err),
+            }
         })?;
 
     log::debug!("Response text: {:?}", r);

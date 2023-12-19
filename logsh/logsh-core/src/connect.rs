@@ -10,7 +10,7 @@ use std::fmt;
 use crate::auth::{AuthData, AuthRequest};
 use crate::error::{AuthError, ConnectError, OAuthError, QueryError, ConfigError};
 use crate::config;
-use crate::query::QueryRequest;
+use crate::query::{QueryRequest, ApiErrorModel};
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Connection {
@@ -227,13 +227,19 @@ impl Connection {
             return Ok(response.text()?);
         }
         else if response.status().is_client_error() | response.status().is_informational() {
+            let error_text = response.text()?;
+            log::debug!("Response: {}", error_text);
             return Err(QueryError::BadRequest(
-                response.text()?,
+                error_text.try_into()?,
             ));
         }
         else {
             response.error_for_status()?;
-            return Err(QueryError::BadRequest("Query failed with unknown error.".to_string()));
+            return Err(QueryError::BadRequest(ApiErrorModel{
+                message: "Unknown error".to_string(),
+                stack_trace: None,
+                errors: vec![],
+            }));
         }
     }
 }

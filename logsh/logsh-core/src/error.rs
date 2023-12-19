@@ -1,5 +1,7 @@
 use thiserror::Error;
 
+use crate::query;
+
 #[derive(Debug, Error)]
 pub enum CliError {
     #[error("No command provided.")]
@@ -92,8 +94,8 @@ pub enum QueryError {
     #[error("JSON Error: {0}")]
     Json(#[from] serde_json::Error),
 
-    #[error("Bad request: {0}")]
-    BadRequest(String),
+    #[error("Bad request.")]
+    BadRequest(query::ApiErrorModel),
 }
 
 #[derive(Debug, Error)]
