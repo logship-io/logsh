@@ -72,6 +72,9 @@ pub enum ConfigError {
 
     #[error("No default connection found.")]
     NoDefaultConnection,
+
+    #[error("No default subscription found.")]
+    NoDefaultSubscription,
 }
 
 #[derive(Debug, Error)]
