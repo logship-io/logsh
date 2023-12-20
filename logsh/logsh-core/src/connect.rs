@@ -226,7 +226,7 @@ impl Connection {
         if response.status().is_success() {
             return Ok(response.text()?);
         }
-        else if response.status().is_client_error() | response.status().is_informational() {
+        else if (response.status().is_client_error() || response.status().is_informational()) && response.content_length().is_some_and(|x| x > 0) {
             let error_text = response.text()?;
             log::debug!("Response: {}", error_text);
             return Err(QueryError::BadRequest(
