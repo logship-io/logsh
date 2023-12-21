@@ -5,6 +5,8 @@ use logsh_core::{config::Configuration, error::ConnectError};
 use reqwest::StatusCode;
 use serde::Serialize;
 
+pub mod parse;
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Connection {

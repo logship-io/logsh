@@ -17,7 +17,7 @@ use term_table::{
     Table, TableStyle,
 };
 
-use crate::OutputMode;
+use crate::{OutputMode, fmt::parse::OptionalDurationArg};
 use annotate_snippets::{Annotation, AnnotationType, Renderer, Slice, Snippet, SourceAnnotation};
 
 pub fn markdown_style() -> TableStyle {
@@ -45,6 +45,9 @@ pub struct QueryCommand {
 
     #[arg(short, long, help = "Output result format")]
     output: Option<OutputMode>,
+
+    #[arg(short, long, help = "Query timeout. Use \"none\" to disable timeout.", default_value = "60s")]
+    timeout: OptionalDurationArg,
 }
 
 fn to_source_annotation<'a>(msg: &'a ErrorMessage, e: &'a ErrorToken) -> SourceAnnotation<'a> {
@@ -75,9 +78,10 @@ pub fn execute_query<W: Write>(command: QueryCommand, mut write: W) -> Result<()
     let connection = cfg
         .get_default_connection()
         .ok_or(anyhow::anyhow!("No logsh connections"))?;
+    log::info!("Starting query. Timeout = {}", &command.timeout);
     let r = connection
         .connection
-        .query_raw(&query)
+        .query_raw(&query, command.timeout.into())
         .map_err(|err| -> Error {
             match err {
                 logsh_core::error::QueryError::BadRequest(bad_request) => {

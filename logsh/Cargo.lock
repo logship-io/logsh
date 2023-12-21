@@ -815,6 +815,7 @@ dependencies = [
  "clap",
  "colored",
  "csv",
+ "humantime",
  "log",
  "logsh-core",
  "pretty_env_logger",

@@ -115,9 +115,13 @@ pub enum UploadError {
     FailedToReadFileContent(serde_json::Error),
 
     #[error("Failed to upload: {0}")]
-    UploadFailure(reqwest::Error),
+    Reqwest(#[from] reqwest::Error),
+
     #[error("Failed to upload, status: {0}, message: {1}")]
     UploadFailureStatus(i32, String),
+
+    #[error("File IO error: {0}")]
+    FileIO(#[from] std::io::Error),
 }
 
 #[derive(Debug, Error)]

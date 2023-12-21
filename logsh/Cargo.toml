@@ -28,6 +28,7 @@ tempfile = "3.8.0"
 reqwest = "0.11.20"
 colored = "2.0.4"
 annotate-snippets = "0.10.0"
+humantime = "2.1.0"
 
 [build-dependencies]
 anyhow = "1.0.75"

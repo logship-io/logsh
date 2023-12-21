@@ -1,4 +1,4 @@
-use chrono::{Duration, Utc};
+use chrono::Utc;
 use oauth2::TokenResponse;
 use reqwest::StatusCode;
 use reqwest::blocking::RequestBuilder;
@@ -182,7 +182,7 @@ impl Connection {
                 AuthData::OAuth { expires: _, data } => {
                     if let Some(expires_in) = data.token.expires_in() {
                         let expiry = data.received
-                            .checked_add_signed(Duration::seconds(expires_in.as_secs() as i64))
+                            .checked_add_signed(chrono::Duration::seconds(expires_in.as_secs() as i64))
                             .ok_or(ConnectError::Auth(AuthError::Expired))?;
                         if Utc::now() > expiry {
                             log::warn!("OAuth token is expired.");
@@ -201,7 +201,7 @@ impl Connection {
         }
     }
 
-    pub fn query_raw(&self, query: &str) -> Result<String, QueryError> {
+    pub fn query_raw(&self, query: &str, timeout: Option<std::time::Duration>) -> Result<String, QueryError> {
         if query.trim().is_empty() {
             return Err(QueryError::NoInput);
         }
@@ -214,7 +214,9 @@ impl Connection {
 
         let sub = &self.default_subscription()
             .ok_or(QueryError::Config(ConfigError::NoDefaultSubscription))?;
-        let client = client_builder().build()?;
+        let client = client_builder()
+            .timeout(timeout)
+            .build()?;
         let response = self
             .authenticate_request(client.post(format!(
                 "{}/search/{}/kusto",
@@ -224,17 +226,20 @@ impl Connection {
             .json(&req)
             .send()?;
         if response.status().is_success() {
+            log::error!("Success Response");
             return Ok(response.text()?);
         }
         else if (response.status().is_client_error() || response.status().is_informational()) && response.content_length().is_some_and(|x| x > 0) {
             let error_text = response.text()?;
-            log::debug!("Response: {}", error_text);
+            log::error!("Error or Informational Response: {}", error_text);
             return Err(QueryError::BadRequest(
                 error_text.try_into()?,
             ));
         }
         else {
-            response.error_for_status()?;
+            let response = response.error_for_status()?;
+            let error_text = response.text()?;
+            log::error!("Error Response: {}", error_text);
             return Err(QueryError::BadRequest(ApiErrorModel{
                 message: "Unknown error".to_string(),
                 stack_trace: None,
@@ -265,7 +270,7 @@ pub struct SubscriptionsModel {
 
 static USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"),);
 
-fn client_builder() -> reqwest::blocking::ClientBuilder {
+pub(crate) fn client_builder() -> reqwest::blocking::ClientBuilder {
     reqwest::blocking::Client::builder()
         .user_agent(USER_AGENT)
         .default_headers({
