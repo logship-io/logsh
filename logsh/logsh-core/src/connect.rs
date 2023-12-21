@@ -124,7 +124,7 @@ impl Connection {
         }
     }
 
-    pub(crate) fn refresh_oauth(&self) -> Result<OAuthConfigResponse, AuthError> {
+    pub(crate) fn refresh_oauth(&self) -> Result<OAuthConfigResponse, ConnectError> {
         log::trace!("Requesting OAuth config for connection.");
         let client = client_builder().build().unwrap();
         let res = client
@@ -169,7 +169,7 @@ impl Connection {
 
     pub fn refresh_auth<F>(&mut self, auth: Option<AuthRequest<F>>) -> Result<(), ConnectError>
     where
-        F: FnOnce() -> Result<String, AuthError>,
+        F: FnOnce() -> Result<String, ConnectError>,
     {
         log::debug!("Refreshing authentication for {self}");
         let client = client_builder().build()?;
@@ -194,7 +194,7 @@ impl Connection {
                 }
             },
             (_, Some(a)) => {
-                let auth = a.authenticate(client, self).map_err(ConnectError::Auth)?;
+                let auth = a.authenticate(client, self)?;
                 self.auth = Some(auth);
                 Ok(())
             }
@@ -217,29 +217,27 @@ impl Connection {
         let client = client_builder()
             .timeout(timeout)
             .build()?;
-        let response = self
+        let req = self
             .authenticate_request(client.post(format!(
                 "{}/search/{}/kusto",
                 &self.server.trim_end_matches('/'),
                 sub
             )))
             .json(&req)
-            .send()?;
+            .build()?;
+            
+        let response = client.execute(req)?;
         if response.status().is_success() {
-            log::error!("Success Response");
             return Ok(response.text()?);
         }
-        else if (response.status().is_client_error() || response.status().is_informational()) && response.content_length().is_some_and(|x| x > 0) {
+        else if response.status().is_client_error() || response.status().is_informational() {
             let error_text = response.text()?;
-            log::error!("Error or Informational Response: {}", error_text);
             return Err(QueryError::BadRequest(
                 error_text.try_into()?,
             ));
         }
         else {
-            let response = response.error_for_status()?;
-            let error_text = response.text()?;
-            log::error!("Error Response: {}", error_text);
+            response.error_for_status()?;
             return Err(QueryError::BadRequest(ApiErrorModel{
                 message: "Unknown error".to_string(),
                 stack_trace: None,
@@ -289,7 +287,7 @@ pub fn add_connect<'a, F>(
     auth: Option<AuthRequest<F>>,
 ) -> Result<Connection, ConnectError>
 where
-    F: FnOnce() -> Result<String, AuthError>,
+    F: FnOnce() -> Result<String, ConnectError>,
 {
     let connection: Connection = {
         let mut cfg = config::load()?;

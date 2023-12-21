@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 
-use crate::{connect::Connection, error::AuthError};
+use crate::{connect::Connection, error::ConnectError};
 
 use self::oauth::{OAuthData, OAuthFlow};
 
@@ -23,7 +23,7 @@ pub enum AuthData {
 
 pub enum AuthRequest<F>
 where
-    F: FnOnce() -> Result<String, AuthError>,
+    F: FnOnce() -> Result<String, ConnectError>,
 {
     Jwt {
         username: String,
@@ -41,9 +41,9 @@ where
 
 impl<F> AuthRequest<F>
 where
-    F: FnOnce() -> Result<String, AuthError>,
+    F: FnOnce() -> Result<String, ConnectError>,
 {
-    pub fn authenticate(self, client: Client, connection: &Connection) -> Result<AuthData, AuthError> {
+    pub fn authenticate(self, client: Client, connection: &Connection) -> Result<AuthData, ConnectError> {
         match self {
             AuthRequest::Jwt { username, password } => {
                 return jwt::fetch_token(connection, &client, username, password);
@@ -71,7 +71,7 @@ where
                     scopes = oauth.scopes;
                 }
 
-                let never = || -> Result<String, AuthError> { Ok(String::new()) };
+                let never = || -> Result<String, ConnectError> { Ok(String::new()) };
                 return oauth::authenticate(
                     connection,
                     &client,

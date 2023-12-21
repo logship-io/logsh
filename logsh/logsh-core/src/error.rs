@@ -3,39 +3,6 @@ use thiserror::Error;
 use crate::query;
 
 #[derive(Debug, Error)]
-pub enum CliError {
-    #[error("No command provided.")]
-    NoCommandProvided,
-
-    #[error("Config Error: {0}")]
-    Config(#[from] ConfigError),
-
-    #[error("Password error {0}")]
-    PasswordError(Box<dyn std::error::Error>),
-
-    #[error("No connection found with name {0}")]
-    NoNamedConnection(String),
-
-    #[error("Unable to connect to server: {0}")]
-    UnableToConnect(reqwest::Error),
-
-    #[error("Unable to parse token response: {0}")]
-    UnableToParseJwtToken(reqwest::Error),
-
-    #[error("Unable to read configuration: {0}")]
-    UnableToReadConfig(ConfigError),
-
-    #[error("Unable to write configuration: {0}")]
-    UnableToWriteConfig(ConfigError),
-
-    #[error("FailedToParseQueryResult: {0}")]
-    FailedToParseQueryResult(serde_json::Error),
-
-    #[error("Query error: {0}")]
-    QueryError(QueryError),
-}
-
-#[derive(Debug, Error)]
 pub enum CommonError {
     #[error("File not found: {0}")]
     FileNotFound(std::string::String),
@@ -81,6 +48,9 @@ pub enum ConfigError {
 pub enum QueryError {
     #[error("No connection. {0}")]
     Config(#[from] ConfigError),
+
+    #[error("Connection Error. {0}")]
+    Connection(#[from] ConnectError),
 
     #[error("Query string was empty.")]
     NoInput,
@@ -138,9 +108,6 @@ pub enum ConnectError {
     #[error("Auth Error: {0}")]
     Auth(#[from] AuthError),
 
-    #[error("Client error: {0}")]
-    CliError(crate::error::CliError),
-
     #[error("HTTP Response Failed: {0}")]
     HttpResponseFailed(reqwest::StatusCode),
 
@@ -156,9 +123,6 @@ pub enum ConnectError {
 
 #[derive(Debug, Error)]
 pub enum AuthError {
-    #[error("An error occurred with the request: {0}")]
-    Network(#[from] reqwest::Error),
-
     #[error("The specified authentication has timed out and cannot be automatically refreshed.")]
     Expired,
 
@@ -207,9 +171,6 @@ pub enum OAuthError {
 
 #[derive(Debug, Error)]
 pub enum LoginError {
-    #[error("Client error: {0}")]
-    CliError(crate::error::CliError),
-
     #[error("Configuration error during login: {0}")]
     ConfigError(#[from] ConfigError),
 

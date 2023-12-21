@@ -9,7 +9,7 @@ use clap::arg;
 use colored::Colorize;
 use logsh_core::{
     config,
-    query::{ErrorMessage, ErrorToken},
+    error::{ConfigError, ConnectError},
 };
 use term_table::{
     row::Row,
@@ -17,8 +17,7 @@ use term_table::{
     Table, TableStyle,
 };
 
-use crate::{OutputMode, fmt::parse::OptionalDurationArg};
-use annotate_snippets::{Annotation, AnnotationType, Renderer, Slice, Snippet, SourceAnnotation};
+use crate::{fmt::parse::OptionalDurationArg, OutputMode};
 
 pub fn markdown_style() -> TableStyle {
     let mut style: TableStyle = TableStyle::simple();
@@ -46,16 +45,13 @@ pub struct QueryCommand {
     #[arg(short, long, help = "Output result format")]
     output: Option<OutputMode>,
 
-    #[arg(short, long, help = "Query timeout. Use \"none\" to disable timeout.", default_value = "60s")]
+    #[arg(
+        short,
+        long,
+        help = "Query timeout. Use \"none\" to disable timeout.",
+        default_value = "60s"
+    )]
     timeout: OptionalDurationArg,
-}
-
-fn to_source_annotation<'a>(msg: &'a ErrorMessage, e: &'a ErrorToken) -> SourceAnnotation<'a> {
-    SourceAnnotation {
-        label: msg.message.as_ref().unwrap().as_str(),
-        annotation_type: AnnotationType::Error,
-        range: (e.start as usize + 1, e.end as usize + 1),
-    }
 }
 
 pub fn execute_query<W: Write>(command: QueryCommand, mut write: W) -> Result<(), Error> {
@@ -75,52 +71,23 @@ pub fn execute_query<W: Write>(command: QueryCommand, mut write: W) -> Result<()
     };
 
     let cfg = config::load()?;
-    let connection = cfg
+    let connection: config::ConnectionConfig = cfg
         .get_default_connection()
-        .ok_or(anyhow::anyhow!("No logsh connections"))?;
+        .ok_or(ConnectError::Config(ConfigError::NoDefaultConnection))?;
     log::info!("Starting query. Timeout = {}", &command.timeout);
     let r = connection
         .connection
         .query_raw(&query, command.timeout.into())
-        .map_err(|err| -> Error {
-            match err {
-                logsh_core::error::QueryError::BadRequest(bad_request) => {
-                    let mut annotations = Vec::new();
-                    for e in bad_request.errors.iter() {
-                        for t in e.tokens.iter() {
-                            let annotation = to_source_annotation(e, t);
-                            annotations.push(annotation);
-                        }
-                    }
-
-                    let snippy = Snippet {
-                        title: Some(Annotation {
-                            label: Some(bad_request.message.as_str()),
-                            id: None,
-                            annotation_type: AnnotationType::Error,
-                        }),
-                        footer: vec![],
-                        slices: vec![Slice {
-                            source: query.as_str(),
-                            line_start: 0,
-                            origin: None,
-                            fold: true,
-                            annotations,
-                        }],
-                    };
-
-                    let renderer = Renderer::styled();
-                    println!("{}", renderer.render(snippy));
-
-                    anyhow!("An error occurred during query execution.")
-                }
-                _ => anyhow!("An error occurred during query execution. {err}").context(err),
-            }
+        .map_err(|err| {
+            crate::fmt::print_query_error(&cfg, &query, &err);
+            err
         })?;
 
     log::debug!("Response text: {:?}", r);
-    let result =
-        logsh_core::query::result(&r).map_err(|e| anyhow!("Unable to parse query result. {e}"))?;
+    let result = logsh_core::query::result(&r).map_err(|err| {
+        crate::fmt::print_query_error(&cfg, &query, &err);
+        err
+    })?;
     let query_duration = start.elapsed();
     let render_start = Instant::now();
     log::trace!("Finished query execution.");

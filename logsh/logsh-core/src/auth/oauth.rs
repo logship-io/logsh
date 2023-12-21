@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     connect::Connection,
-    error::{AuthError, OAuthError},
+    error::{AuthError, OAuthError, ConnectError},
 };
 
 use super::AuthData;
@@ -49,9 +49,9 @@ pub fn authenticate<F>(
     scopes: Vec<String>,
     device_endpoint: Option<String>,
     flow: OAuthFlow,
-) -> Result<AuthData, AuthError>
+) -> Result<AuthData, ConnectError>
 where
-    F: FnOnce() -> Result<String, AuthError>,
+    F: FnOnce() -> Result<String, ConnectError>,
 {
     let scopes: HashSet<String> = scopes.into_iter().collect();
     // scopes.insert("profile".to_string());
@@ -61,24 +61,24 @@ where
         OAuthFlow::Device => {
             log::debug!("Initializing OAuth Device Code Flow");
             let device_endpoint = device_endpoint.ok_or_else(|| {
-                OAuthError::MissingEndpoint("Device Authorization URL".to_string())
+                AuthError::OAuth(OAuthError::MissingEndpoint("Device Authorization URL".to_string()))
             })?;
             let device_auth_url = DeviceAuthorizationUrl::new(device_endpoint.clone())
-                .map_err(OAuthError::ParseError)?;
+                .map_err(|err| AuthError::OAuth(OAuthError::ParseError(err)))?;
             let c = BasicClient::new(
                 ClientId::new(client_id.clone()),
                 None,
-                AuthUrl::new(authorize_endpoint.clone()).map_err(OAuthError::ParseError)?,
-                Some(TokenUrl::new(token_endpoint.clone()).map_err(OAuthError::ParseError)?),
+                AuthUrl::new(authorize_endpoint.clone()).map_err(|err| AuthError::OAuth(OAuthError::ParseError(err)))?,
+                Some(TokenUrl::new(token_endpoint.clone()).map_err(|err| AuthError::OAuth(OAuthError::ParseError(err)))?),
             )
             .set_device_authorization_url(device_auth_url);
 
             let details: StandardDeviceAuthorizationResponse = c
                 .exchange_device_code()
-                .map_err(OAuthError::ConfigurationError)?
+                .map_err(|err| AuthError::OAuth(OAuthError::ConfigurationError(err)))?
                 .add_scopes(scopes.iter().map(|s| Scope::new(s.clone())))
                 .request(http_client)
-                .map_err(OAuthError::DeviceTokenErrorResponse)?;
+                .map_err(|err| AuthError::OAuth(OAuthError::DeviceTokenErrorResponse(err)))?;
             println!(
                 "Open this URL in your browser: {}\nEnter the following code: {}",
                 details.verification_uri().to_string(),
@@ -88,7 +88,7 @@ where
             let token_result = c
                 .exchange_device_access_token(&details)
                 .request(http_client, std::thread::sleep, None)
-                .map_err(OAuthError::TokenErrorResponse)?;
+                .map_err(|err| AuthError::OAuth(OAuthError::TokenErrorResponse(err)))?;
             Ok(AuthData::OAuth {
                 expires: Some(Utc::now()),
                 data: OAuthData {

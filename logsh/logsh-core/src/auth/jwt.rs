@@ -4,20 +4,18 @@ use chrono::Utc;
 use reqwest::blocking::Client;
 use serde::Deserialize;
 
-use crate::{connect::Connection, error::AuthError};
+use crate::{connect::Connection, error::ConnectError};
 
 use super::AuthData;
-
-type Error = AuthError;
 
 pub fn fetch_token<F>(
     connection: &Connection,
     client: &Client,
     username: String,
     password: F,
-) -> Result<AuthData, Error>
+) -> Result<AuthData, ConnectError>
 where
-    F: FnOnce() -> Result<String, Error>,
+    F: FnOnce() -> Result<String, ConnectError>,
 {
     let mut map = HashMap::new();
     map.insert("username", username);

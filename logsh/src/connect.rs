@@ -4,7 +4,7 @@ use colored::Colorize;
 use logsh_core::{
     config,
     connect::Connection,
-    error::{AuthError, ConfigError},
+    error::{AuthError, BasicAuthError, ConfigError, ConnectError},
     query::QueryResultFmt,
 };
 use std::{collections::HashMap, io::Write};
@@ -43,6 +43,7 @@ pub fn execute_subscription(command: ConfigSubscriptionCommand) -> Result<(), Er
 }
 
 pub fn execute_connect(command: ConfigConnectionCommand) -> Result<(), Error> {
+    let mut cfg = config::load()?;
     match command {
         ConfigConnectionCommand::Add(AddConnectionCommand::Basic {
             name,
@@ -53,12 +54,12 @@ pub fn execute_connect(command: ConfigConnectionCommand) -> Result<(), Error> {
         }) => {
             log::trace!("Entering {}.", "add user connection".bright_black().bold());
             let default = default.unwrap_or(true);
-            let mut cfg = logsh_core::config::load()?;
             let server = server
                 .or_else(|| cfg.connections.get(&name).map(|s| s.server.to_owned()))
                 .ok_or(anyhow!(
                     "Missing required argument \"server\" for new connection."
                 ))?;
+
             let username = match username {
                 Some(username) => username,
                 None => {
@@ -84,7 +85,7 @@ pub fn execute_connect(command: ConfigConnectionCommand) -> Result<(), Error> {
                 username: username.clone(),
                 password: || {
                     if let Some(password) = password {
-                        return Result::<String, AuthError>::Ok(password);
+                        return Result::<String, ConnectError>::Ok(password);
                     }
 
                     rpassword::prompt_password(format!(
@@ -94,8 +95,9 @@ pub fn execute_connect(command: ConfigConnectionCommand) -> Result<(), Error> {
                         "'s password".cyan().bold(),
                         ":".cyan(),
                     ))
-                    .map_err(logsh_core::error::BasicAuthError::IOError)
-                    .map_err(logsh_core::error::AuthError::BasicAuth)
+                    .map_err(BasicAuthError::IOError)
+                    .map_err(AuthError::BasicAuth)
+                    .map_err(ConnectError::Auth)
                 },
             });
 
@@ -114,10 +116,16 @@ pub fn execute_connect(command: ConfigConnectionCommand) -> Result<(), Error> {
 
                     cfg.connections.insert(name, connection);
                     log::info!("Saving new connection.");
-                    logsh_core::config::save(cfg)?;
+                    logsh_core::config::save(cfg).map_err(|err| {
+                        crate::fmt::print_config_error(&err);
+                        err
+                    })?;
                     Ok(())
                 }
-                Err(err) => Err(anyhow!("Error adding connection: {err}")),
+                Err(err) => {
+                    crate::fmt::print_connect_error(&cfg, &err);
+                    Err(anyhow!("Error adding connection: {err}"))
+                }
             }
         }
         ConfigConnectionCommand::Add(AddConnectionCommand::OAuth {
@@ -134,23 +142,27 @@ pub fn execute_connect(command: ConfigConnectionCommand) -> Result<(), Error> {
                 ))?;
 
             let c = Connection::new(&server);
-            let c =
-                logsh_core::connect::add_connect::<Box<dyn FnOnce() -> Result<String, AuthError>>>(
-                    name.clone(),
-                    Some(c),
-                    Some(logsh_core::auth::AuthRequest::OAuth {
-                        client_id: String::default(),
-                        device_endpoint: None,
-                        scopes: vec![],
-                        authorize_endpoint: String::default(),
-                        token_endpoint: String::default(),
-                        flow: match flow {
-                            OAuthFlow::Device => logsh_core::auth::oauth::OAuthFlow::Device,
-                            // OAuthFlow::Browser => logsh_core::auth::oauth::OAuthFlow::Code,
-                        },
-                    }),
-                )
-                .map_err(|err| anyhow!("Failed to connect with OAuth: {err}"))?;
+            let c = logsh_core::connect::add_connect::<
+                Box<dyn FnOnce() -> Result<String, ConnectError>>,
+            >(
+                name.clone(),
+                Some(c),
+                Some(logsh_core::auth::AuthRequest::OAuth {
+                    client_id: String::default(),
+                    device_endpoint: None,
+                    scopes: vec![],
+                    authorize_endpoint: String::default(),
+                    token_endpoint: String::default(),
+                    flow: match flow {
+                        OAuthFlow::Device => logsh_core::auth::oauth::OAuthFlow::Device,
+                        // OAuthFlow::Browser => logsh_core::auth::oauth::OAuthFlow::Code,
+                    },
+                }),
+            )
+            .map_err(|err| {
+                crate::fmt::print_connect_error(&cfg, &err);
+                err
+            })?;
 
             if let Some(_old) = cfg.connections.insert(name.clone(), c) {
                 log::info!(
@@ -166,7 +178,11 @@ pub fn execute_connect(command: ConfigConnectionCommand) -> Result<(), Error> {
                 );
                 cfg.default_connection = name.clone();
             }
-            config::save(cfg)?;
+
+            config::save(cfg).map_err(|err| {
+                crate::fmt::print_config_error(&err);
+                err
+            })?;
             Ok(())
         }
         ConfigConnectionCommand::List { output } => list(std::io::stdout(), output),
@@ -182,19 +198,24 @@ pub fn execute_connect(command: ConfigConnectionCommand) -> Result<(), Error> {
                 return Ok(());
             }
 
-            config::save(cfg)?;
+            config::save(cfg).map_err(|err| {
+                crate::fmt::print_config_error(&err);
+                err
+            })?;
             Ok(())
         }
         ConfigConnectionCommand::Default { name } => {
-            let mut cfg = config::load()?;
             if !cfg.connections.contains_key(&name) {
-                return Err(anyhow!(
-                    "Connection \"{name}\" does not exist in configuration."
-                ));
+                let err = ConnectError::NoConnection(name.clone());
+                crate::fmt::print_connect_error(&cfg, &err);
+                return Err(anyhow!("Invalid Input: {}", err));
             }
 
             cfg.default_connection = name;
-            config::save(cfg)?;
+            config::save(cfg).map_err(|err| {
+                crate::fmt::print_config_error(&err);
+                err
+            })?;
             Ok(())
         }
         ConfigConnectionCommand::Login { name } => {
@@ -228,12 +249,18 @@ pub fn execute_connect(command: ConfigConnectionCommand) -> Result<(), Error> {
                             },
                         ));
                     } else {
-                        return Err(anyhow!(
-                            "No authentication scheme defined for this connection."
-                        ));
+                        let err = ConnectError::InvalidConfigError(
+                            "No authentication defined for this connection.".to_string(),
+                        );
+                        crate::fmt::print_connect_error(&cfg, &err);
+                        Err(anyhow!("Invalid Auth Configuration: {}", err))
                     }
                 }
-                None => Err(anyhow!("No connection exists with name: {:?}", name)),
+                None => {
+                    let err = ConnectError::NoConnection(name.unwrap_or_default().to_string());
+                    crate::fmt::print_connect_error(&cfg, &err);
+                    Err(anyhow!("Invalid Input: {}", err))
+                }
             }
         }
     }

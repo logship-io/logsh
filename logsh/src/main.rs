@@ -11,6 +11,7 @@ use clap::{
 };
 use colored::Colorize;
 
+
 mod config;
 mod connect;
 mod fmt;
@@ -95,36 +96,39 @@ fn main() -> Result<(), Error> {
             log::debug!("No arguments provided. Output status.");
             let cfg = logsh_core::config::load()?;
             let conn = cfg.get_default_connection();
-            match conn {
-                Some(conn) => {
-                    match conn.connection.who_am_i() {
-                        Ok(user) => {
-                            let sub = conn
-                                .connection
-                                .default_subscription()
-                                .map_or("None".to_string(), |s| s.to_string());
-                            println!("Status: {}", "Connected".green());
-                            println!(
-                                "Logged into connection {} as user {} with subscription: {}",
-                                &conn.name.blue(),
-                                &user.user_name.blue(),
-                                sub.blue()
-                            );
-                        }
-                        Err(err) => {
-                            fmt::print_connect_error(&cfg, &conn.name, &conn.connection, err)
-                        }
-                    };
-                }
+            let result = match conn {
+                Some(conn) => match conn.connection.who_am_i() {
+                    Ok(user) => {
+                        let sub = conn
+                            .connection
+                            .default_subscription()
+                            .map_or("None".to_string(), |s| s.to_string());
+                        println!("Status: {}", "Connected".green());
+                        println!(
+                            "Logged into connection {} as user {} with subscription: {}",
+                            &conn.name.blue(),
+                            &user.user_name.blue(),
+                            sub.blue()
+                        );
+                        Ok(())
+                    }
+                    Err(err) => {
+                        println!("Status: {}", "Not Connected".red());
+                        fmt::print_connect_error(&cfg, &err);
+                        Err(err)
+                    }
+                },
                 None => {
                     println!(
                         "Status: {} {}",
                         "Missing default connection.".red(),
                         "Configuration Required.".red()
                     );
+
                     fmt::print_add_connection_help();
+                    Ok(())
                 }
-            }
+            };
 
             println!(
                 "{} {} {}",
@@ -132,7 +136,8 @@ fn main() -> Result<(), Error> {
                 "logsh --help".blue(),
                 "to view available commands.".bright_black()
             );
-            Ok(())
+
+            result.map_err(|err| anyhow!("Status check failed: {err}"))
         }
     }
 }

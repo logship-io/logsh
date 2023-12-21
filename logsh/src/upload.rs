@@ -9,7 +9,12 @@ pub struct UploadCommand {
     schema: String,
     path: String,
 
-    #[arg(short, long, help = "Upload timeout. Use \"none\" to disable timeout.", default_value = "none")]
+    #[arg(
+        short,
+        long,
+        help = "Upload timeout. Use \"none\" to disable timeout.",
+        default_value = "none"
+    )]
     timeout: OptionalDurationArg,
 }
 
