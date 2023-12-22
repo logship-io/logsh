@@ -1,4 +1,5 @@
 use chrono::Utc;
+use log::debug;
 use oauth2::TokenResponse;
 use reqwest::StatusCode;
 use reqwest::blocking::RequestBuilder;
@@ -227,10 +228,12 @@ impl Connection {
             .build()?;
             
         let response = client.execute(req)?;
+
+        debug!("WTF {} content length {}", response.status(), response.content_length().unwrap_or(0));
         if response.status().is_success() {
             return Ok(response.text()?);
         }
-        else if response.status().is_client_error() || response.status().is_informational() {
+        else if response.status() == StatusCode::BAD_REQUEST {
             let error_text = response.text()?;
             return Err(QueryError::BadRequest(
                 error_text.try_into()?,

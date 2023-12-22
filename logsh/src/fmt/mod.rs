@@ -105,6 +105,10 @@ pub(crate) fn print_query_error(
                 }
             }
 
+            // This is stupid, but the library we're using is stupid.
+            // You can't highlight an error which goes all the way tot he end of the line.
+            // So add a tiny space to the end of the line.
+            let extended_source = query.to_string() + " ";
             let snippy = Snippet {
                 title: Some(Annotation {
                     label: Some(bad_request.message.as_str()),
@@ -113,7 +117,7 @@ pub(crate) fn print_query_error(
                 }),
                 footer: vec![],
                 slices: vec![Slice {
-                    source: query,
+                    source: extended_source.as_str(),
                     line_start: 0,
                     origin: None,
                     fold: true,

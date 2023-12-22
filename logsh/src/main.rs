@@ -11,7 +11,6 @@ use clap::{
 };
 use colored::Colorize;
 
-
 mod config;
 mod connect;
 mod fmt;
