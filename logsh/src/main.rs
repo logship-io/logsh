@@ -120,7 +120,7 @@ fn main() -> Result<(), Error> {
                 None => {
                     println!(
                         "Status: {} {}",
-                        "Missing default connection.".red(),
+                        "You don't have any connections configured yet!".red(),
                         "Configuration Required.".red()
                     );
 

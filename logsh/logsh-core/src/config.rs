@@ -23,10 +23,13 @@ pub struct ConnectionConfig {
 
 impl Configuration {
     pub fn get_default_connection(&self) -> Option<ConnectionConfig> {
+        if self.connections.len() == 0 {
+            return None;
+        }
+
         if let Some(c) = self.connections.get(&self.default_connection) {
             return Some(ConnectionConfig { name: self.default_connection.clone(), connection: c.clone() });
         }
-
         
         let conn = self.connections.iter().next();
         if let Some((name, _conn)) = conn {
