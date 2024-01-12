@@ -16,15 +16,15 @@ impl FromStr for OptionalDurationArg {
 
         let duration = humantime::parse_duration(arg)?;
         log::debug!("Parsed duration seconds: {}", duration.as_secs());
-        return Ok(Self {
-            duration: Some(duration.into()),
-        });
+        Ok(Self {
+            duration: Some(duration),
+        })
     }
 }
 
-impl Into<Option<std::time::Duration>> for OptionalDurationArg {
-    fn into(self) -> Option<std::time::Duration> {
-        self.duration
+impl From<OptionalDurationArg> for Option<std::time::Duration> {
+    fn from(val: OptionalDurationArg) -> Self {
+        val.duration
     }
 }
 
@@ -43,7 +43,7 @@ impl AsMut<Option<std::time::Duration>> for OptionalDurationArg {
 impl fmt::Display for OptionalDurationArg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.duration {
-            Some(duration) => humantime::format_duration(duration.into()).fmt(f),
+            Some(duration) => humantime::format_duration(duration).fmt(f),
             None => write!(f, "None"),
         }
     }

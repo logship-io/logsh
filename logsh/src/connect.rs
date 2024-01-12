@@ -106,7 +106,7 @@ pub fn execute_connect(command: ConfigConnectionCommand) -> Result<(), Error> {
                         default.to_string().blue()
                     );
 
-                    if default || cfg.connections.len() == 0 {
+                    if default || cfg.connections.is_empty() {
                         cfg.default_connection = name.clone();
                     }
 
@@ -167,7 +167,7 @@ pub fn execute_connect(command: ConfigConnectionCommand) -> Result<(), Error> {
                 )
             }
 
-            if default.unwrap_or(true) || cfg.connections.len() == 0 {
+            if default.unwrap_or(true) || cfg.connections.is_empty() {
                 log::info!(
                     "Setting OAuth connection \"{}\" as default connection.",
                     name.yellow().dimmed()
