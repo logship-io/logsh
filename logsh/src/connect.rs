@@ -24,20 +24,16 @@ pub fn execute_subscription(command: ConfigSubscriptionCommand) -> Result<(), Er
     match command {
         ConfigSubscriptionCommand::List { output } => list_subscriptions(std::io::stdout(), output),
         ConfigSubscriptionCommand::Default { name } => {
-            let mut cfg = logsh_core::config::load()?;
-            let conn = cfg
+            let cfg = logsh_core::config::load()?;
+            let conn = &mut cfg
                 .get_default_connection()
                 .ok_or(ConfigError::NoDefaultConnection)?;
-            let mut new: Connection = conn.connection.clone();
-            match conn.connection.subscriptions.get(&name) {
-                Some(_id) => {
-                    new.default_subscription = Some(name);
-                    cfg.connections.insert(conn.name.to_owned(), new);
-                    logsh_core::config::save(cfg)?;
-                    Ok(())
-                }
-                None => Err(anyhow!("Subscription {} does not exist.", name)),
-            }
+
+            let subscriptions = conn.connection.subscriptions(conn.connection.user_id)?;
+            let found = subscriptions.iter().find(|s| s.account_name == name).ok_or(anyhow!("Subscription {} does not exist.", name))?;
+            conn.connection.default_subscription = Some(found.account_id);
+            logsh_core::config::save(cfg)?;
+            Ok(())
         }
     }
 }
@@ -110,7 +106,7 @@ pub fn execute_connect(command: ConfigConnectionCommand) -> Result<(), Error> {
                         default.to_string().blue()
                     );
 
-                    if default {
+                    if default || cfg.connections.len() == 0 {
                         cfg.default_connection = name.clone();
                     }
 
@@ -171,7 +167,7 @@ pub fn execute_connect(command: ConfigConnectionCommand) -> Result<(), Error> {
                 )
             }
 
-            if default.unwrap_or(true) {
+            if default.unwrap_or(true) || cfg.connections.len() == 0 {
                 log::info!(
                     "Setting OAuth connection \"{}\" as default connection.",
                     name.yellow().dimmed()
@@ -376,9 +372,9 @@ fn list_subscriptions<W: Write>(mut write: W, mode: Option<OutputMode>) -> Resul
         .get_default_connection()
         .ok_or(ConfigError::NoDefaultConnection)?;
 
+    let subs = conn.connection.subscriptions(conn.connection.user_id)?;
     let default_sub = conn.connection.default_subscription();
-    let mut subs = Vec::from_iter(conn.connection.subscriptions.iter());
-    subs.sort_by_key(|s| s.0);
+    //subs.sort_by_key(|s| s.account_name.as_str());
     match mode.unwrap_or_default() {
         OutputMode::Table | OutputMode::Markdown => {
             let mut table = Table::new();
@@ -395,10 +391,10 @@ fn list_subscriptions<W: Write>(mut write: W, mode: Option<OutputMode>) -> Resul
 
             subs.iter().for_each(|f| {
                 table.add_row(Row::new(vec![
-                    TableCell::new_with_alignment(&f.1.to_string().white(), 1, Alignment::Left),
-                    TableCell::new_with_alignment(&f.0.white(), 1, Alignment::Right),
+                    TableCell::new_with_alignment(&f.account_id.to_string().white(), 1, Alignment::Left),
+                    TableCell::new_with_alignment(&f.account_name.white(), 1, Alignment::Right),
                     TableCell::new_with_alignment(
-                        serde_json::Value::String(if default_sub.map_or(false, |s| &s == f.1) {
+                        serde_json::Value::String(if default_sub.map_or(false, |s| s == f.account_id) {
                             "true".to_owned()
                         } else {
                             "false".to_owned()
@@ -414,11 +410,11 @@ fn list_subscriptions<W: Write>(mut write: W, mode: Option<OutputMode>) -> Resul
             writeln!(write, "{}", render).map_err(|e| anyhow!("Failed to write output: {}", e))
         }
         OutputMode::Json => {
-            let json = serde_json::to_string(&conn.connection.subscriptions)?;
+            let json = serde_json::to_string(&subs)?;
             writeln!(write, "{}", json).map_err(|e| anyhow!("Failed to write json output: {}", e))
         }
         OutputMode::JsonPretty => {
-            let json = serde_json::to_string_pretty(&conn.connection.subscriptions)?;
+            let json = serde_json::to_string_pretty(&subs)?;
             writeln!(write, "{}", json)
                 .map_err(|e| anyhow!("Failed to write pretty json output: {}", e))
         }
@@ -429,13 +425,13 @@ fn list_subscriptions<W: Write>(mut write: W, mode: Option<OutputMode>) -> Resul
                     HashMap::from([
                         (
                             "Name".to_string(),
-                            serde_json::Value::String(c.1.to_string()),
+                            serde_json::Value::String(c.account_name.to_string()),
                         ),
-                        ("Id".to_string(), serde_json::Value::String(c.0.to_string())),
+                        ("Id".to_string(), serde_json::Value::String(c.account_id.to_string())),
                         (
                             "Default".to_string(),
                             serde_json::Value::String(
-                                if default_sub.map_or(false, |s| s == *c.1) {
+                                if default_sub.map_or(false, |s| s == c.account_id) {
                                     "true".to_owned()
                                 } else {
                                     "false".to_owned()

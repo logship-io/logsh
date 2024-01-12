@@ -5,7 +5,6 @@ use reqwest::StatusCode;
 use reqwest::blocking::RequestBuilder;
 use reqwest::header::{HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::fmt;
 
 use crate::auth::{AuthData, AuthRequest};
@@ -16,10 +15,9 @@ use crate::query::{QueryRequest, ApiErrorModel};
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Connection {
     pub server: String,
-    pub user: Option<uuid::Uuid>,
+    pub user_id: uuid::Uuid,
     pub username: String,
-    pub default_subscription: Option<String>,
-    pub subscriptions: HashMap<String, uuid::Uuid>,
+    pub default_subscription: Option<uuid::Uuid>,
     auth: Option<AuthData>,
 }
 
@@ -46,7 +44,7 @@ impl fmt::Display for Connection {
             f,
             "Server: {}; User: {}; Default Subscription: {:?}",
             self.server,
-            self.user.unwrap_or_default(),
+            self.user_id,
             self.default_subscription()
         )
     }
@@ -77,28 +75,15 @@ impl Connection {
     pub fn new(server: &str) -> Self {
         Self {
             server: server.trim().to_string(),
-            user: None,
+            user_id: uuid::Uuid::default(),
             username: String::default(),
             default_subscription: None,
-            subscriptions: HashMap::default(),
             auth: None,
         }
     }
 
     pub fn default_subscription(&self) -> Option<uuid::Uuid> {
-        if let Some(d) = self.default_subscription.as_ref() {
-            if let Some(sub) = self.subscriptions.get(d) {
-                return Some(sub.to_owned());
-            }
-        }
-
-        let mut subs = Vec::from_iter(self.subscriptions.iter());
-        subs.sort_by_key(|s| s.0);
-        if subs.len() > 0 {
-            return Some(subs[0].1.to_owned());
-        }
-
-        None
+        return self.default_subscription;
     }
 
     pub fn is_jwt_auth(&self) -> bool {
@@ -300,11 +285,13 @@ where
             let user = c.who_am_i()?;
             let mut subs = c.subscriptions(user.user_id)?;
             subs.sort_by(|a, b| a.account_name.cmp(&b.account_name));
-            c.user = Some(user.user_id);
+            c.user_id = user.user_id;
             c.username = user.user_name;
-            c.subscriptions = subs.into_iter()
-                .map(|s| (s.account_name, s.account_id))
-                .collect();
+
+            if c.default_subscription.is_none() {
+                c.default_subscription = subs.first().map(|s| s.account_id);
+            }
+
             Ok(c.clone())
         } else {
             match conn_entry {
@@ -314,11 +301,13 @@ where
                     let user = c.who_am_i()?;
                     let mut subs = c.subscriptions(user.user_id)?;
                     subs.sort_by(|a, b| a.account_name.cmp(&b.account_name));
-                    c.user = Some(user.user_id);
+                    c.user_id = user.user_id;
                     c.username = user.user_name;
-                    c.subscriptions = subs.into_iter()
-                        .map(|s| (s.account_name, s.account_id))
-                        .collect();
+
+                    if c.default_subscription.is_none() {
+                        c.default_subscription = subs.first().map(|s| s.account_id);
+                    }
+
                     Ok(c.clone())
                 },
                 std::collections::hash_map::Entry::Vacant(_) => {
