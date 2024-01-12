@@ -36,7 +36,15 @@ impl Configuration {
             log::warn!("Default connection \"{}\" does not exist. Updating to \"{}\".", &self.default_connection, name);
         }
 
-        return Some(ConnectionConfig { name: self.default_connection.clone(), connection: conn.unwrap().1.clone() });
+        match conn {
+            Some((name, conn)) => {
+                Some(ConnectionConfig { name: name.to_string(), connection: conn.clone() })
+            },
+            None => {
+                log::error!("No connections found.");
+                None
+            },
+        }
     }
 }
 

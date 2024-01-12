@@ -30,7 +30,10 @@ pub fn execute_subscription(command: ConfigSubscriptionCommand) -> Result<(), Er
                 .ok_or(ConfigError::NoDefaultConnection)?;
 
             let subscriptions = conn.connection.subscriptions(conn.connection.user_id)?;
-            let found = subscriptions.iter().find(|s| s.account_name == name).ok_or(anyhow!("Subscription {} does not exist.", name))?;
+            let found = subscriptions
+                .iter()
+                .find(|s| s.account_name == name)
+                .ok_or(anyhow!("Subscription {} does not exist.", name))?;
             conn.connection.default_subscription = Some(found.account_id);
             logsh_core::config::save(cfg)?;
             Ok(())
@@ -391,14 +394,20 @@ fn list_subscriptions<W: Write>(mut write: W, mode: Option<OutputMode>) -> Resul
 
             subs.iter().for_each(|f| {
                 table.add_row(Row::new(vec![
-                    TableCell::new_with_alignment(&f.account_id.to_string().white(), 1, Alignment::Left),
+                    TableCell::new_with_alignment(
+                        &f.account_id.to_string().white(),
+                        1,
+                        Alignment::Left,
+                    ),
                     TableCell::new_with_alignment(&f.account_name.white(), 1, Alignment::Right),
                     TableCell::new_with_alignment(
-                        serde_json::Value::String(if default_sub.map_or(false, |s| s == f.account_id) {
-                            "true".to_owned()
-                        } else {
-                            "false".to_owned()
-                        }),
+                        serde_json::Value::String(
+                            if default_sub.map_or(false, |s| s == f.account_id) {
+                                "true".to_owned()
+                            } else {
+                                "false".to_owned()
+                            },
+                        ),
                         1,
                         Alignment::Left,
                     ),
@@ -427,7 +436,10 @@ fn list_subscriptions<W: Write>(mut write: W, mode: Option<OutputMode>) -> Resul
                             "Name".to_string(),
                             serde_json::Value::String(c.account_name.to_string()),
                         ),
-                        ("Id".to_string(), serde_json::Value::String(c.account_id.to_string())),
+                        (
+                            "Id".to_string(),
+                            serde_json::Value::String(c.account_id.to_string()),
+                        ),
                         (
                             "Default".to_string(),
                             serde_json::Value::String(

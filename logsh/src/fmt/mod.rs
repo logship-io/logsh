@@ -100,8 +100,9 @@ pub(crate) fn print_query_error(
             let mut annotations = Vec::new();
             for e in bad_request.errors.iter() {
                 for t in e.tokens.iter() {
-                    let annotation = to_source_annotation(e, t);
-                    annotations.push(annotation);
+                    if let Some(annotation) = to_source_annotation(e, t) {
+                        annotations.push(annotation);
+                    }
                 }
             }
 
@@ -135,10 +136,16 @@ pub(crate) fn print_query_error(
     }
 }
 
-fn to_source_annotation<'a>(msg: &'a ErrorMessage, e: &'a ErrorToken) -> SourceAnnotation<'a> {
-    SourceAnnotation {
-        label: msg.message.as_ref().unwrap().as_str(),
-        annotation_type: AnnotationType::Error,
-        range: (e.start as usize + 1, e.end as usize + 1),
+fn to_source_annotation<'a>(
+    msg: &'a ErrorMessage,
+    e: &'a ErrorToken,
+) -> Option<SourceAnnotation<'a>> {
+    match msg.message.as_ref() {
+        Some(msg) => Some(SourceAnnotation {
+            label: msg.as_str(),
+            annotation_type: AnnotationType::Error,
+            range: (e.start as usize + 1, e.end as usize + 1),
+        }),
+        None => None,
     }
 }

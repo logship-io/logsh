@@ -112,7 +112,7 @@ impl Connection {
 
     pub(crate) fn refresh_oauth(&self) -> Result<OAuthConfigResponse, ConnectError> {
         log::trace!("Requesting OAuth config for connection.");
-        let client = client_builder().build().unwrap();
+        let client = client_builder().build()?;
         let res = client
             .get(format!("{}/auth/oauth", self.server.trim_end_matches('/')))
             .send()?
