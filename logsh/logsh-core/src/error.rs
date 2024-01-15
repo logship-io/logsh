@@ -45,6 +45,22 @@ pub enum ConfigError {
 }
 
 #[derive(Debug, Error)]
+pub enum ClientError {
+    #[error("{0}")]
+    Common(CommonError),
+    #[error("Failed to load config: {0}")]
+    Config(#[from] ConfigError),
+    #[error("Failed to make request: {0}")]
+    Reqwest(#[from] reqwest::Error),
+    #[error("The connection was not found: {0}")]
+    ConnectionNotFound(String),
+    #[error("The subscription was not found: {0}")]
+    SubscriptionNotFound(String),
+    #[error("No token found for connection")]
+    NoToken,
+}
+
+#[derive(Debug, Error)]
 pub enum QueryError {
     #[error("No connection. {0}")]
     Config(#[from] ConfigError),
@@ -188,4 +204,10 @@ pub enum LoginError {
 
     #[error("OAuth Failed. No tokens in response.")]
     TokenResponseError,
+}
+
+#[derive(Debug, Error)]
+pub enum SubscriptionError {
+    #[error("Client error during login: {0}")]
+    ConfigError(#[from] ClientError),
 }

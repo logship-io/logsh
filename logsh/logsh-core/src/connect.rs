@@ -1,4 +1,4 @@
-use chrono::Utc;
+use chrono::{Utc, DateTime};
 use log::debug;
 use oauth2::TokenResponse;
 use reqwest::StatusCode;
@@ -55,21 +55,18 @@ impl fmt::Display for Connection {
 pub struct UserModel {
     pub user_id: uuid::Uuid,
     pub user_name: String,
-    /*
-     * first_name: String,
-     * last_name: String,
-     * nick_name: String,
-     * contact: Vec<ContactModel>,
-     */
 }
 
-// #[derive(Deserialize)]
-// #[serde(rename_all = "camelCase")]
-// pub struct ContactModel {
-//     #[serde(rename = "type")]
-//     typ: String,
-//     value: String,
-// }
+fn get_token_if_not_expired<T>(expiration : &Option<DateTime<Utc>>, token : T) -> Option<T> {
+    if let Some(expiration) = expiration {
+        if Utc::now() > *expiration {
+            log::debug!("Token is expired.");
+            return None;
+        }
+    }
+
+    Some(token)
+}
 
 impl Connection {
     pub fn new(server: &str) -> Self {
@@ -90,6 +87,14 @@ impl Connection {
         match self.auth {
             Some(AuthData::Jwt { expires: _, token: _ }) => true,
             _ => false,
+        }
+    }
+
+    pub fn get_token(&self) -> Option<String> {
+        match &self.auth {
+            Some(AuthData::Jwt { expires: expiration, token }) => get_token_if_not_expired(expiration, token.to_owned()),
+            Some(AuthData::OAuth { expires: expiration, data }) => get_token_if_not_expired(expiration, data.token.access_token().secret().to_string()),
+            None => None,
         }
     }
 

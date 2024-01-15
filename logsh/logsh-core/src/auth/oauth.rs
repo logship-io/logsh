@@ -90,7 +90,7 @@ where
                 .request(http_client, std::thread::sleep, None)
                 .map_err(|err| AuthError::OAuth(OAuthError::TokenErrorResponse(err)))?;
             Ok(AuthData::OAuth {
-                expires: Some(Utc::now()),
+                expires: Some(Utc::now().add(details.expires_in())),
                 data: OAuthData {
                     received: Utc::now().add(details.expires_in()),
                     authorize_endpoint: authorize_endpoint.clone(),

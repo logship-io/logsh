@@ -1,6 +1,6 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::Add};
 
-use chrono::Utc;
+use chrono::{Utc, Duration};
 use reqwest::blocking::Client;
 use serde::Deserialize;
 
@@ -31,7 +31,7 @@ where
 
     let token: TokenResponse = res.json()?;
     Ok(AuthData::Jwt {
-        expires: Some(Utc::now()),
+        expires: Some(Utc::now().add(Duration::hours(24))),
         token: token.token
     })
 }

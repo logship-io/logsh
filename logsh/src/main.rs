@@ -15,6 +15,7 @@ mod config;
 mod connect;
 mod fmt;
 mod query;
+mod subscription;
 mod upload;
 mod version;
 
@@ -56,6 +57,10 @@ enum Commands {
     Connection(crate::config::ConfigConnectionCommand),
     #[command(subcommand)]
     Config(crate::config::ConfigCommand),
+
+    #[command(subcommand)]
+    Subscription(crate::subscription::SubscriptionCommand),
+
     Query(crate::query::QueryCommand),
     Upload(crate::upload::UploadCommand),
     Version(crate::version::VersionCommand),
@@ -90,6 +95,7 @@ fn main() -> Result<(), Error> {
         Some(Commands::Version(command)) => {
             crate::version::version(std::io::stdout(), command, cli.verbose)
         }
+        Some(Commands::Subscription(command)) => crate::subscription::execute_subscription(command),
         Some(Commands::Config(command)) => crate::config::execute_config(command),
         None => {
             log::debug!("No arguments provided. Output status.");
