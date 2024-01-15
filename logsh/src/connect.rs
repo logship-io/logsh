@@ -4,7 +4,7 @@ use colored::Colorize;
 use logsh_core::{
     config,
     connect::Connection,
-    error::{AuthError, BasicAuthError, ConfigError, ConnectError},
+    error::{AuthError, BasicAuthError, ConnectError},
     query::QueryResultFmt,
 };
 use std::{collections::HashMap, io::Write};
@@ -15,31 +15,10 @@ use term_table::{
 };
 
 use crate::{
-    config::{AddConnectionCommand, ConfigConnectionCommand, ConfigSubscriptionCommand, OAuthFlow},
+    config::{AddConnectionCommand, ConfigConnectionCommand, OAuthFlow},
     query::markdown_style,
     OutputMode,
 };
-
-pub fn execute_subscription(command: ConfigSubscriptionCommand) -> Result<(), Error> {
-    match command {
-        ConfigSubscriptionCommand::List { output } => list_subscriptions(std::io::stdout(), output),
-        ConfigSubscriptionCommand::Default { name } => {
-            let cfg = logsh_core::config::load()?;
-            let conn = &mut cfg
-                .get_default_connection()
-                .ok_or(ConfigError::NoDefaultConnection)?;
-
-            let subscriptions = conn.connection.subscriptions(conn.connection.user_id)?;
-            let found = subscriptions
-                .iter()
-                .find(|s| s.account_name == name)
-                .ok_or(anyhow!("Subscription {} does not exist.", name))?;
-            conn.connection.default_subscription = Some(found.account_id);
-            logsh_core::config::save(cfg)?;
-            Ok(())
-        }
-    }
-}
 
 pub fn execute_connect(command: ConfigConnectionCommand) -> Result<(), Error> {
     let mut cfg = config::load()?;
@@ -344,111 +323,6 @@ fn list<W: Write>(mut write: W, mode: Option<OutputMode>) -> Result<(), Error> {
                         (
                             "Default".to_string(),
                             serde_json::Value::String(c.is_default.to_string()),
-                        ),
-                    ])
-                })
-                .collect();
-            let result = QueryResultFmt {
-                header: vec![
-                    "Name".to_string(),
-                    "Server".to_string(),
-                    "Default".to_string(),
-                ],
-                results,
-            };
-            let result = serde_json::to_string(&result).map_err(|e| {
-                anyhow::anyhow!("Error converting connections to query response json: {}", e)
-            })?;
-            let query = result
-                .as_str()
-                .try_into()
-                .map_err(|e| anyhow::anyhow!("Error converting connection json to csv: {}", e))?;
-            logsh_core::csv::write_csv(&query, write)
-                .map_err(|e| anyhow!("Failed to write csv output: {}", e))
-        }
-    }
-}
-
-fn list_subscriptions<W: Write>(mut write: W, mode: Option<OutputMode>) -> Result<(), Error> {
-    let config = logsh_core::config::load()?;
-    let conn = config
-        .get_default_connection()
-        .ok_or(ConfigError::NoDefaultConnection)?;
-
-    let subs = conn.connection.subscriptions(conn.connection.user_id)?;
-    let default_sub = conn.connection.default_subscription();
-    //subs.sort_by_key(|s| s.account_name.as_str());
-    match mode.unwrap_or_default() {
-        OutputMode::Table | OutputMode::Markdown => {
-            let mut table = Table::new();
-            table.style = match mode.unwrap_or_default() {
-                OutputMode::Table => TableStyle::thin(),
-                OutputMode::Markdown => markdown_style(),
-                _ => unreachable!(),
-            };
-            table.add_row(Row::new(vec![
-                TableCell::new_with_alignment("Id".bright_white().bold(), 1, Alignment::Left),
-                TableCell::new_with_alignment("Name".bright_white().bold(), 1, Alignment::Right),
-                TableCell::new_with_alignment("Default".bright_white().bold(), 1, Alignment::Left),
-            ]));
-
-            subs.iter().for_each(|f| {
-                table.add_row(Row::new(vec![
-                    TableCell::new_with_alignment(
-                        &f.account_id.to_string().white(),
-                        1,
-                        Alignment::Left,
-                    ),
-                    TableCell::new_with_alignment(&f.account_name.white(), 1, Alignment::Right),
-                    TableCell::new_with_alignment(
-                        serde_json::Value::String(
-                            if default_sub.map_or(false, |s| s == f.account_id) {
-                                "true".to_owned()
-                            } else {
-                                "false".to_owned()
-                            },
-                        ),
-                        1,
-                        Alignment::Left,
-                    ),
-                ]));
-            });
-
-            log::trace!("Rendering output table.");
-            let render = table.render();
-            writeln!(write, "{}", render).map_err(|e| anyhow!("Failed to write output: {}", e))
-        }
-        OutputMode::Json => {
-            let json = serde_json::to_string(&subs)?;
-            writeln!(write, "{}", json).map_err(|e| anyhow!("Failed to write json output: {}", e))
-        }
-        OutputMode::JsonPretty => {
-            let json = serde_json::to_string_pretty(&subs)?;
-            writeln!(write, "{}", json)
-                .map_err(|e| anyhow!("Failed to write pretty json output: {}", e))
-        }
-        OutputMode::Csv => {
-            let results = subs
-                .iter()
-                .map(|c| {
-                    HashMap::from([
-                        (
-                            "Name".to_string(),
-                            serde_json::Value::String(c.account_name.to_string()),
-                        ),
-                        (
-                            "Id".to_string(),
-                            serde_json::Value::String(c.account_id.to_string()),
-                        ),
-                        (
-                            "Default".to_string(),
-                            serde_json::Value::String(
-                                if default_sub.map_or(false, |s| s == c.account_id) {
-                                    "true".to_owned()
-                                } else {
-                                    "false".to_owned()
-                                },
-                            ),
                         ),
                     ])
                 })

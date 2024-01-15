@@ -19,8 +19,6 @@ pub enum ConfigCommand {
     },
     #[clap(subcommand)]
     Connection(ConfigConnectionCommand),
-    #[clap(subcommand)]
-    Subscription(ConfigSubscriptionCommand),
 }
 
 #[derive(Subcommand)]
@@ -152,6 +150,5 @@ pub(crate) fn execute_config(command: ConfigCommand) -> Result<(), anyhow::Error
         }
 
         ConfigCommand::Connection(command) => connect::execute_connect(command),
-        ConfigCommand::Subscription(command) => connect::execute_subscription(command),
     }
 }
