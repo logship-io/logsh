@@ -8,9 +8,10 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 use crate::auth::{AuthData, AuthRequest};
+use crate::common::ApiErrorModel;
 use crate::error::{AuthError, ConnectError, OAuthError, QueryError, ConfigError};
 use crate::config;
-use crate::query::{QueryRequest, ApiErrorModel};
+use crate::query::QueryRequest;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Connection {
@@ -225,17 +226,19 @@ impl Connection {
         }
         else if response.status() == StatusCode::BAD_REQUEST {
             let error_text = response.text()?;
-            return Err(QueryError::BadRequest(
-                error_text.try_into()?,
+            return Err(QueryError::Common(
+                crate::error::CommonError::ApiError(
+                    error_text.as_str().try_into()?,
+                )
             ));
         }
         else {
             response.error_for_status()?;
-            return Err(QueryError::BadRequest(ApiErrorModel{
+            return Err(QueryError::Common(crate::error::CommonError::ApiError(ApiErrorModel{
                 message: "Unknown error".to_string(),
                 stack_trace: None,
                 errors: vec![],
-            }));
+            })));
         }
     }
 }

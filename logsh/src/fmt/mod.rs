@@ -4,9 +4,9 @@ use annotate_snippets::{Annotation, AnnotationType, Renderer, Slice, Snippet, So
 
 use colored::Colorize;
 use logsh_core::{
+    common::{ErrorMessage, ErrorToken},
     config::Configuration,
     error::{ConfigError, ConnectError},
-    query::{ErrorMessage, ErrorToken},
 };
 use reqwest::StatusCode;
 use serde::Serialize;
@@ -96,7 +96,9 @@ pub(crate) fn print_query_error(
     match err {
         logsh_core::error::QueryError::Config(err) => print_config_error(err),
         logsh_core::error::QueryError::Request(err) => print_reqwest_error(cfg, err),
-        logsh_core::error::QueryError::BadRequest(bad_request) => {
+        logsh_core::error::QueryError::Common(logsh_core::error::CommonError::ApiError(
+            bad_request,
+        )) => {
             let mut annotations = Vec::new();
             for e in bad_request.errors.iter() {
                 for t in e.tokens.iter() {

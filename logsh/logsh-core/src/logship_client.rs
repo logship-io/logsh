@@ -1,4 +1,4 @@
-use crate::{error::{self}, config};
+use crate::{error::{self}, config, common::ApiErrorModel, connect::Connection};
 
 pub struct LogshClient {
     pub server : String,
@@ -21,6 +21,16 @@ fn get_clean_path(path: &str) -> &str {
     path_clean
 }
 
+fn map_api_error(response : reqwest::blocking::Response) -> error::ClientError {
+    let error = response.json::<ApiErrorModel>()
+        .unwrap_or(ApiErrorModel {
+            message: "Unknown".to_string(),
+            stack_trace: None,
+            errors: vec![]
+        });
+    error::ClientError::Common(error::CommonError::ApiError(error))
+}
+
 impl LogshClient {
     pub fn new(server: &str, token : String) -> Self {
         Self {
@@ -37,6 +47,39 @@ impl LogshClient {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert("Authorization", format!("Bearer {}", self.token).parse().unwrap());
         let response = client.get(&url).headers(headers).send()?;
+        if !response.status().is_success() {
+            return Err(map_api_error(response));
+        }
+        let json = response.json()?;
+        Ok(json)
+    }
+
+    pub fn post_json<TRequest : serde::Serialize, TResult :  for<'de> serde::Deserialize<'de>>(&self, path: &str, request : &TRequest) -> Result<TResult, error::ClientError> {
+        let path_clean = get_clean_path(path);
+        let url = format!("{}/{}", self.server, path_clean);
+        log::debug!("[POST] {}", url);
+        let client = reqwest::blocking::Client::new();
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("Authorization", format!("Bearer {}", self.token).parse().unwrap());
+        let response = client.post(&url).headers(headers).json(request).send()?;
+        if !response.status().is_success() {
+            return Err(map_api_error(response));
+        }
+        let json = response.json()?;
+        Ok(json)
+    }
+
+    pub fn put<TRequest : Into<reqwest::blocking::Body>, TResult :  for<'de> serde::Deserialize<'de>>(&self, path: &str, request : TRequest) -> Result<TResult, error::ClientError> {
+        let path_clean = get_clean_path(path);
+        let url = format!("{}/{}", self.server, path_clean);
+        log::debug!("[POST] {}", url);
+        let client = reqwest::blocking::Client::new();
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("Authorization", format!("Bearer {}", self.token).parse().unwrap());
+        let response = client.put(&url).headers(headers).body(request).send()?;
+        if !response.status().is_success() {
+            return Err(map_api_error(response));
+        }
         let json = response.json()?;
         Ok(json)
     }
@@ -48,7 +91,10 @@ impl LogshClient {
         let client = reqwest::blocking::Client::new();
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert("Authorization", format!("Bearer {}", self.token).parse().unwrap());
-        client.delete(&url).headers(headers).send()?;
+        let response = client.delete(&url).headers(headers).send()?;
+        if !response.status().is_success() {
+            return Err(map_api_error(response));
+        }
         Ok(())
     }
 }
@@ -60,15 +106,17 @@ impl LogshClientHandler {
         }
     }
 
-    pub fn execute<T>(&self, arg : &dyn LogshClientHandlerExecute<T>) -> Result<T, error::ClientError> {
+    pub fn get_connection(&self) -> Result<Connection, error::ClientError> {
         let default_config = config::load()?;
-
-        // Grab the connection.
         let connection = match &self.override_connection_name {
             Some(name) => default_config.connections.get(name).ok_or(error::ClientError::ConnectionNotFound(name.to_string()))?.clone(),
             None => default_config.get_default_connection().ok_or(error::ConfigError::NoDefaultConnection)?.connection.clone()
         };
+        Ok(connection)
+    }
 
+    pub fn execute<T>(&self, arg : &dyn LogshClientHandlerExecute<T>) -> Result<T, error::ClientError> {
+        let connection = self.get_connection()?;
         let token = connection.get_token().ok_or(error::ClientError::NoToken)?;
 
         let client = LogshClient::new(connection.server.as_ref(), token);

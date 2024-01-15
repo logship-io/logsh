@@ -5,7 +5,7 @@ use std::{
 
 use crate::{
     connect::Connection,
-    error::{CommonError, UploadError},
+    error::{CommonError, UploadError, ClientError}, logship_client::LogshClientHandler,
 };
 
 pub fn execute<'a>(
@@ -53,4 +53,48 @@ pub fn execute<'a>(
         .send()?
         .error_for_status()?;
     return Ok(());
+}
+
+pub fn execute_upload<'a>(
+    client: &LogshClientHandler,
+    schema_str: &'a str,
+    path_str: &'a str,
+) -> Result<(), UploadError> {
+    if path_str.trim().is_empty() {
+        log::debug!("Uploading file: {:?}", path_str);
+        return Err(UploadError::Common(CommonError::EmptyArgument(
+            "path".to_string(),
+        )));
+    }
+
+    let path = Path::new(path_str);
+    if !path.exists() {
+        return Err(UploadError::Common(CommonError::FileNotFound(
+            path_str.to_string(),
+        )));
+    }
+
+    let ext = path.extension()
+        .ok_or(UploadError::UnsupportedFileExtension("".to_string()))
+        .map(|e| e.to_string_lossy())?;
+
+    let connection = client.get_connection()?;
+    if connection.default_subscription.is_none() {
+        return Err(UploadError::Config(crate::error::ConfigError::NoDefaultSubscription));
+    }
+
+    let query_url = format!(
+        "inflow/{}/{}/{}",
+        connection.default_subscription.unwrap(),
+        schema_str,
+        ext,
+    );
+
+    client.execute_func(&|client| -> Result<(), ClientError> {
+        let file = File::open(path).map_err(|err| { ClientError::Common(CommonError::IOError(err))})?;
+        let _result = client.put(&query_url, file)?;
+        Ok(())
+    })?;
+
+    Ok(())
 }

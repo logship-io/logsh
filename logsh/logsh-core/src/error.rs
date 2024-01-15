@@ -1,17 +1,26 @@
 use thiserror::Error;
 
-use crate::query;
+use crate::common::ApiErrorModel;
 
 #[derive(Debug, Error)]
 pub enum CommonError {
     #[error("File not found: {0}")]
     FileNotFound(std::string::String),
 
+    #[error("IO Error: {0}")]
+    IOError(#[from] std::io::Error),
+
     #[error("Argument {0} is empty")]
     EmptyArgument(std::string::String),
 
     #[error("End of file")]
     EndOfFile(),
+
+    #[error("{0}")]
+    ApiError(ApiErrorModel),
+
+    #[error("JSON Error: {0}")]
+    Json(#[from] serde_json::Error),
 }
 
 #[derive(Debug, Error)]
@@ -62,6 +71,9 @@ pub enum ClientError {
 
 #[derive(Debug, Error)]
 pub enum QueryError {
+    #[error("{0}")]
+    Common(#[from] CommonError),
+
     #[error("No connection. {0}")]
     Config(#[from] ConfigError),
 
@@ -82,9 +94,6 @@ pub enum QueryError {
 
     #[error("JSON Error: {0}")]
     Json(#[from] serde_json::Error),
-
-    #[error("Bad request.")]
-    BadRequest(query::ApiErrorModel),
 }
 
 #[derive(Debug, Error)]
@@ -93,6 +102,8 @@ pub enum UploadError {
     Common(CommonError),
     #[error("{0}")]
     Config(ConfigError),
+    #[error("{0}")]
+    Client(#[from] ClientError),
     #[error("Unsupported file extension: {0}")]
     UnsupportedFileExtension(String),
     #[error("Failed to read file: {0}")]

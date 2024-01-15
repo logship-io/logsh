@@ -4,29 +4,6 @@ use std::collections::HashMap;
 
 use crate::error::QueryError;
 
-#[derive(serde::Deserialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct ErrorToken {
-    pub start: i32,
-    pub end: i32,
-}
-
-
-#[derive(serde::Deserialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct ErrorMessage {
-    pub message: Option<String>,
-    pub tokens: Vec<ErrorToken>,
-}
-
-#[derive(serde::Deserialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct ApiErrorModel {
-    pub message: String,
-    pub stack_trace: Option<String>,
-    pub errors : Vec<ErrorMessage>
-}
-
 #[derive(Clone, Copy, Debug, serde::Serialize)]
 pub struct QueryRequest<'a, 'b> {
     pub query: &'a str,
@@ -73,13 +50,5 @@ impl<'a> TryFrom<&'a str> for QueryResult<'a> {
 
     fn try_from(value: &'a str) -> Result<Self, Self::Error> {
         serde_json::from_str(value).map_err(QueryError::Json)
-    }
-}
-
-impl TryFrom<String> for ApiErrorModel {
-    type Error = QueryError;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        serde_json::from_str(value.as_str()).map_err(QueryError::Json)
     }
 }

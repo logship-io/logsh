@@ -1,3 +1,4 @@
+pub mod common;
 pub mod logship_client;
 pub mod auth;
 pub mod config;
