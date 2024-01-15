@@ -140,12 +140,9 @@ fn to_source_annotation<'a>(
     msg: &'a ErrorMessage,
     e: &'a ErrorToken,
 ) -> Option<SourceAnnotation<'a>> {
-    match msg.message.as_ref() {
-        Some(msg) => Some(SourceAnnotation {
-            label: msg.as_str(),
-            annotation_type: AnnotationType::Error,
-            range: (e.start as usize + 1, e.end as usize + 1),
-        }),
-        None => None,
-    }
+    msg.message.as_ref().map(|msg| SourceAnnotation {
+        label: msg.as_str(),
+        annotation_type: AnnotationType::Error,
+        range: (e.start as usize + 1, e.end as usize + 1),
+    })
 }

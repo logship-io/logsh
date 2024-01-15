@@ -1,5 +1,5 @@
 use anyhow::anyhow;
-use clap::{Subcommand, ValueEnum};
+use clap::Subcommand;
 use logsh_core::{logship_client::LogshClientHandler, subscription::list_subscriptions};
 use term_table::{
     row::Row,
@@ -38,6 +38,7 @@ pub fn execute_subscription(command: SubscriptionCommand) -> Result<(), anyhow::
             table.style = markdown_style();
             table.add_row(Row::new(vec![
                 TableCell::new_with_alignment("Name", 1, Alignment::Left),
+                TableCell::new_with_alignment("ID", 1, Alignment::Left),
                 TableCell::new_with_alignment("Default", 1, Alignment::Left),
             ]));
 
@@ -48,6 +49,11 @@ pub fn execute_subscription(command: SubscriptionCommand) -> Result<(), anyhow::
                     .is_some_and(|s| s == subscription.account_id);
                 table.add_row(Row::new(vec![
                     TableCell::new_with_alignment(&subscription.account_name, 1, Alignment::Left),
+                    TableCell::new_with_alignment(
+                        &subscription.account_id.to_string(),
+                        1,
+                        Alignment::Left,
+                    ),
                     TableCell::new_with_alignment(
                         if is_default { "Yes" } else { "no" },
                         1,

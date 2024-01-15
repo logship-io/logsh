@@ -1,5 +1,4 @@
-use crate::{error::{self, ClientError}, config};
-use serde::{Deserialize, Serialize};
+use crate::{error::{self}, config};
 
 pub struct LogshClient {
     pub server : String,
