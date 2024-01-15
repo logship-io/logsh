@@ -1,6 +1,9 @@
 use anyhow::anyhow;
 use clap::Subcommand;
-use logsh_core::{logship_client::LogshClientHandler, subscription::list_subscriptions};
+use logsh_core::{
+    logship_client::LogshClientHandler,
+    subscription::{delete_subscription, list_subscriptions},
+};
 use term_table::{
     row::Row,
     table_cell::{Alignment, TableCell},
@@ -12,15 +15,61 @@ use crate::query::markdown_style;
 #[derive(Subcommand)]
 #[clap(visible_alias = "sub", about = "Subscription management.")]
 pub enum SubscriptionCommand {
-    #[clap(about = "List Subscriptoins")]
+    #[clap(about = "List subscriptions", visible_alias = "ls")]
     List {
         #[arg(long, help = "Include all subscriptions.")]
         include_all: bool,
+    },
+    #[clap(about = "Set the default subscription for the current connection.")]
+    Default {
+        #[arg(help = "Subscription ID to set as default.")]
+        id: uuid::Uuid,
+    },
+    #[clap(about = "Delete a subscription")]
+    Delete {
+        #[arg(help = "Subscription ID to delete.")]
+        id: uuid::Uuid,
     },
 }
 
 pub fn execute_subscription(command: SubscriptionCommand) -> Result<(), anyhow::Error> {
     match command {
+        SubscriptionCommand::Default { id } => {
+            let default_config = logsh_core::config::load()?;
+            let default_connection = default_config
+                .get_default_connection()
+                .ok_or(anyhow!("No default connection found."))?;
+            let conn_handler = LogshClientHandler::new();
+
+            let subscriptions =
+                list_subscriptions(&conn_handler, default_connection.connection.user_id, false)?;
+
+            let subscription = subscriptions
+                .iter()
+                .find(|s| s.account_id == id)
+                .ok_or(anyhow!("Subscription not found."))?;
+
+            let mut config = default_config;
+            config.connections.iter_mut().for_each(|c| {
+                if c.0 != default_connection.name.as_str() {
+                    return;
+                }
+
+                c.1.default_subscription = Some(subscription.account_id);
+            });
+            logsh_core::config::save(config)?;
+
+            println!(
+                "Default subscription set to {} ({})",
+                subscription.account_name, subscription.account_id
+            );
+            Ok(())
+        }
+        SubscriptionCommand::Delete { id } => {
+            let conn_handler = LogshClientHandler::new();
+            delete_subscription(&conn_handler, id)?;
+            Ok(())
+        }
         SubscriptionCommand::List { include_all } => {
             let default_config = logsh_core::config::load()?;
             let default_connection = default_config

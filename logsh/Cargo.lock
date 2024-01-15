@@ -810,6 +810,7 @@ dependencies = [
  "tempfile",
  "term-table",
  "toml",
+ "uuid",
 ]
 
 [[package]]

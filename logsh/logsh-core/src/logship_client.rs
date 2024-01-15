@@ -13,6 +13,14 @@ pub struct LogshClientHandler {
     override_connection_name : Option<String>
 }
 
+fn get_clean_path(path: &str) -> &str {
+    let mut path_clean = path;
+    if path.len() > 0 && path.chars().nth(0).unwrap() == '/' {
+        path_clean = path[1..].as_ref();
+    }
+    path_clean
+}
+
 impl LogshClient {
     pub fn new(server: &str, token : String) -> Self {
         Self {
@@ -22,10 +30,7 @@ impl LogshClient {
     }
 
     pub fn get_json<TResult :  for<'de> serde::Deserialize<'de>>(&self, path: &str) -> Result<TResult, error::ClientError> {
-        let mut path_clean = path;
-        if path.len() > 0 && path.chars().nth(0).unwrap() == '/' {
-            path_clean = path[1..].as_ref();
-        }
+        let path_clean = get_clean_path(path);
         let url = format!("{}/{}", self.server, path_clean);
         log::debug!("[GET] {}", url);
         let client = reqwest::blocking::Client::new();
@@ -34,6 +39,17 @@ impl LogshClient {
         let response = client.get(&url).headers(headers).send()?;
         let json = response.json()?;
         Ok(json)
+    }
+
+    pub fn delete(&self, path: &str) -> Result<(), error::ClientError> {
+        let path_clean = get_clean_path(path);
+        let url = format!("{}/{}", self.server, path_clean);
+        log::debug!("[DELETE] {}", url);
+        let client = reqwest::blocking::Client::new();
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("Authorization", format!("Bearer {}", self.token).parse().unwrap());
+        client.delete(&url).headers(headers).send()?;
+        Ok(())
     }
 }
 

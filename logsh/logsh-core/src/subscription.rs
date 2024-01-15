@@ -22,3 +22,16 @@ pub fn list_subscriptions(
 
     Ok(result)
 }
+
+pub fn delete_subscription(
+    connection : &LogshClientHandler,
+    subscription_id : uuid::Uuid) -> Result<(), SubscriptionError> {
+    let query_url = format!("accounts/{}", subscription_id);
+
+    let result = connection.execute_func(&|client| -> Result<(), error::ClientError> {
+        let _result = client.delete(&query_url)?;
+        Ok(())
+    })?;
+
+    Ok(result)
+}
