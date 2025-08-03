@@ -49,8 +49,8 @@ pub enum ConfigError {
     #[error("No default connection found.")]
     NoDefaultConnection,
 
-    #[error("No default subscription found.")]
-    NoDefaultSubscription,
+    #[error("No default account found.")]
+    NoDefaultAccount,
 }
 
 #[derive(Debug, Error)]
@@ -63,8 +63,8 @@ pub enum ClientError {
     Reqwest(#[from] reqwest::Error),
     #[error("The connection was not found: {0}")]
     ConnectionNotFound(String),
-    #[error("The subscription was not found: {0}")]
-    SubscriptionNotFound(String),
+    #[error("The account was not found: {0}")]
+    AccountNotFound(String),
     #[error("No token found for connection")]
     NoToken,
 }
@@ -218,7 +218,7 @@ pub enum LoginError {
 }
 
 #[derive(Debug, Error)]
-pub enum SubscriptionError {
+pub enum AccountError {
     #[error("Client error during login: {0}")]
     ConfigError(#[from] ClientError),
 }

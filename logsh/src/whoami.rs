@@ -16,11 +16,11 @@ pub fn execute_whoami(_command: WhoamiCommand) -> Result<(), Error> {
             Ok(user) => {
                 let sub = conn
                     .connection
-                    .default_subscription()
+                    .default_account()
                     .map_or("None".to_string(), |s| s.to_string());
                 println!("Status: {}", "Connected".green());
                 println!(
-                    "Logged into connection {} as user {} with subscription: {}",
+                    "Logged into connection {} as user {} with account: {}",
                     &conn.name.blue(),
                     &user.user_name.blue(),
                     sub.blue()

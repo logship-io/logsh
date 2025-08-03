@@ -32,7 +32,7 @@ pub fn execute<'a>(
         .ok_or(UploadError::UnsupportedFileExtension("".to_string()))
         .map(|e| e.to_string_lossy())?;
 
-    let sub = &connection.default_subscription()
+    let sub = &connection.default_account()
         .ok_or(UploadError::Config(crate::error::ConfigError::NoDefaultConnection))?;
 
     let client = crate::connect::client_builder()
@@ -79,13 +79,13 @@ pub fn execute_upload<'a>(
         .map(|e| e.to_string_lossy())?;
 
     let connection = client.get_connection()?;
-    if connection.default_subscription.is_none() {
-        return Err(UploadError::Config(crate::error::ConfigError::NoDefaultSubscription));
+    if connection.default_account.is_none() {
+        return Err(UploadError::Config(crate::error::ConfigError::NoDefaultAccount));
     }
 
     let query_url = format!(
         "inflow/{}/{}/{}",
-        connection.default_subscription.unwrap(),
+        connection.default_account.unwrap(),
         schema_str,
         ext,
     );

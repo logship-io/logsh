@@ -10,6 +10,7 @@ use std::fmt;
 use crate::auth::{AuthData, AuthRequest};
 use crate::common::ApiErrorModel;
 use crate::error::{AuthError, ConnectError, OAuthError, QueryError, ConfigError};
+use crate::account::AccountsModel;
 use crate::config;
 use crate::query::QueryRequest;
 
@@ -18,7 +19,7 @@ pub struct Connection {
     pub server: String,
     pub user_id: uuid::Uuid,
     pub username: String,
-    pub default_subscription: Option<uuid::Uuid>,
+    pub default_account: Option<uuid::Uuid>,
     auth: Option<AuthData>,
 }
 
@@ -43,10 +44,10 @@ impl fmt::Display for Connection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "Server: {}; User: {}; Default Subscription: {:?}",
+            "Server: {}; User: {}; Default Account: {:?}",
             self.server,
             self.user_id,
-            self.default_subscription()
+            self.default_account()
         )
     }
 }
@@ -75,13 +76,13 @@ impl Connection {
             server: server.trim().to_string(),
             user_id: uuid::Uuid::default(),
             username: String::default(),
-            default_subscription: None,
+            default_account: None,
             auth: None,
         }
     }
 
-    pub fn default_subscription(&self) -> Option<uuid::Uuid> {
-        return self.default_subscription;
+    pub fn default_account(&self) -> Option<uuid::Uuid> {
+        return self.default_account;
     }
 
     pub fn is_jwt_auth(&self) -> bool {
@@ -146,10 +147,10 @@ impl Connection {
         Ok(response)
     }
 
-    pub fn subscriptions(&self, user: uuid::Uuid) -> Result<Vec<SubscriptionsModel>, ConnectError> {
+    pub fn accounts(&self, user: uuid::Uuid) -> Result<Vec<AccountsModel>, ConnectError> {
         log::debug!("Executing accounts query");
         let client = client_builder().build()?;
-        let response: Vec<SubscriptionsModel> = self
+        let response: Vec<AccountsModel> = self
             .authenticate_request(
                 client.get(format!("{}/users/{}/accounts", &self.server.trim_end_matches('/'), user)),
             )
@@ -204,8 +205,8 @@ impl Connection {
             variables: &[],
         };
 
-        let sub = &self.default_subscription()
-            .ok_or(QueryError::Config(ConfigError::NoDefaultSubscription))?;
+        let sub = &self.default_account()
+            .ok_or(QueryError::Config(ConfigError::NoDefaultAccount))?;
         let client = client_builder()
             .timeout(timeout)
             .build()?;
@@ -253,13 +254,6 @@ pub struct OAuthConfigResponse {
     pub scopes: Vec<String>,
 }
 
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SubscriptionsModel {
-    pub permissions: Vec<String>,
-    pub account_id: uuid::Uuid,
-    pub account_name: String,
-}
 
 
 static USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"),);
@@ -291,13 +285,13 @@ where
         let c = if let Some(c) = connection.as_mut() {
             c.refresh_auth(auth)?;
             let user = c.who_am_i()?;
-            let mut subs = c.subscriptions(user.user_id)?;
+            let mut subs = c.accounts(user.user_id)?;
             subs.sort_by(|a, b| a.account_name.cmp(&b.account_name));
             c.user_id = user.user_id;
             c.username = user.user_name;
 
-            if c.default_subscription.is_none() {
-                c.default_subscription = subs.first().map(|s| s.account_id);
+            if c.default_account.is_none() {
+                c.default_account = subs.first().map(|s| s.account_id);
             }
 
             Ok(c.clone())
@@ -307,13 +301,13 @@ where
                     let c = o.get_mut();
                     c.refresh_auth(auth)?;
                     let user = c.who_am_i()?;
-                    let mut subs = c.subscriptions(user.user_id)?;
+                    let mut subs = c.accounts(user.user_id)?;
                     subs.sort_by(|a, b| a.account_name.cmp(&b.account_name));
                     c.user_id = user.user_id;
                     c.username = user.user_name;
 
-                    if c.default_subscription.is_none() {
-                        c.default_subscription = subs.first().map(|s| s.account_id);
+                    if c.default_account.is_none() {
+                        c.default_account = subs.first().map(|s| s.account_id);
                     }
 
                     Ok(c.clone())

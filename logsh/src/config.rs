@@ -89,16 +89,16 @@ pub enum ConfigConnectionCommand {
 }
 
 #[derive(Subcommand)]
-#[clap(visible_aliases = ["s", "sub"], about = "Configure logsh subscriptions.")]
-pub enum ConfigSubscriptionCommand {
-    #[clap(visible_alias = "ls", about = "List subscriptions.")]
+#[clap(visible_aliases = ["a", "acc"], about = "Configure logsh accounts.")]
+pub enum ConfigAccountCommand {
+    #[clap(visible_alias = "ls", about = "List accounts.")]
     List {
         #[arg(short, long, help = "Output result format")]
         output: Option<OutputMode>,
     },
-    #[clap(visible_alias = "d", about = "Set the default user subscription.")]
+    #[clap(visible_alias = "d", about = "Set the default user account.")]
     Default {
-        #[arg(help = "Subscription name.")]
+        #[arg(help = "Account name.")]
         name: String,
     },
 }

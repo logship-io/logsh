@@ -15,7 +15,7 @@ mod config;
 mod connect;
 mod fmt;
 mod query;
-mod subscription;
+mod account;
 mod upload;
 mod version;
 mod whoami;
@@ -60,7 +60,7 @@ enum Commands {
     Config(crate::config::ConfigCommand),
 
     #[command(subcommand)]
-    Subscription(crate::subscription::SubscriptionCommand),
+    Account(crate::account::AccountCommand),
 
     Query(crate::query::QueryCommand),
     Upload(crate::upload::UploadCommand),
@@ -97,7 +97,7 @@ fn main() -> Result<(), Error> {
         Some(Commands::Version(command)) => {
             crate::version::version(std::io::stdout(), command, cli.verbose)
         }
-        Some(Commands::Subscription(command)) => crate::subscription::execute_subscription(command),
+        Some(Commands::Account(command)) => crate::account::execute_account(command),
         Some(Commands::Config(command)) => crate::config::execute_config(command),
         Some(Commands::Whoami(command)) => crate::whoami::execute_whoami(command),
         None => {
@@ -109,11 +109,11 @@ fn main() -> Result<(), Error> {
                     Ok(user) => {
                         let sub = conn
                             .connection
-                            .default_subscription()
+                            .default_account()
                             .map_or("None".to_string(), |s| s.to_string());
                         println!("Status: {}", "Connected".green());
                         println!(
-                            "Logged into connection {} as user {} with subscription: {}",
+                            "Logged into connection {} as user {} with account: {}",
                             &conn.name.blue(),
                             &user.user_name.blue(),
                             sub.blue()

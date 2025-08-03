@@ -4,10 +4,9 @@ A command-line interface for interacting with [logship](https://logship.io). The
 
 ## Quick Start
 
-1. **Check Status**: Run `logsh` without arguments or `logsh whoami` to see connection status
-2. **Add Connection**: Configure your first Logship connection
-3. **Verify Connection**: Use `logsh whoami` to verify your connection
-4. **Query Logs**: Start querying your log data
+1. **Check Status**: `logsh` without arguments or `logsh whoami`
+2. **Add Connection**: `logsh connection add basic <name> <url>`
+3. **Query Logs**: `logsh query -q "Logship.Agent.Uptime | limit 100"`
 
 ## Usage
 
@@ -20,7 +19,6 @@ logsh
 logsh whoami
 
 # Configure connections
-logsh connection add <name> <url>
 logsh connection list
 
 # Query logs
