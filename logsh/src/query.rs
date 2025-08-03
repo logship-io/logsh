@@ -158,7 +158,7 @@ fn render_table<W: Write>(
                     s.bright_white().bold().to_string()
                 }
             })
-            .map(|f| TableCell::new_with_alignment(f, 1, Alignment::Center)),
+            .map(|f| TableCell::builder(f).col_span(1).alignment(Alignment::Center).build()),
     );
     header_row.has_separator = !is_markdown;
     table.add_row(header_row);
@@ -172,9 +172,9 @@ fn render_table<W: Write>(
                 if let Ok(json) =
                     serde_json::Value::from_str(json).and_then(|j| serde_json::to_string_pretty(&j))
                 {
-                    TableCell::new_with_alignment(json, 1, Alignment::Center)
+                    TableCell::builder(json).col_span(1).alignment(Alignment::Center).build()
                 } else {
-                    TableCell::new_with_alignment(json, 1, Alignment::Center)
+                    TableCell::builder(json).col_span(1).alignment(Alignment::Center).build()
                 }
             }
             _ => {
@@ -185,35 +185,31 @@ fn render_table<W: Write>(
                     if !is_markdown {
                         match json {
                             serde_json::Value::Null => {
-                                return TableCell::new_with_alignment(
-                                    "<null>".bright_black(),
-                                    1,
-                                    Alignment::Center,
-                                )
+                                return TableCell::builder(
+                                    "<null>".bright_black()
+                                ).col_span(1).alignment(Alignment::Center).build()
                             }
                             serde_json::Value::Bool(b) => {
-                                return TableCell::new_with_alignment(
-                                    if b { "true".green() } else { "false".red() },
-                                    1,
-                                    Alignment::Center,
-                                )
+                                return TableCell::builder(
+                                    if b { "true".green() } else { "false".red() }
+                                ).col_span(1).alignment(Alignment::Center).build()
                             }
                             serde_json::Value::Number(n) => {
-                                return TableCell::new_with_alignment(n, 1, Alignment::Left)
+                                return TableCell::builder(n).col_span(1).alignment(Alignment::Left).build()
                             }
                             serde_json::Value::String(s) => {
-                                return TableCell::new_with_alignment(s, 1, Alignment::Center)
+                                return TableCell::builder(s).col_span(1).alignment(Alignment::Center).build()
                             }
                             _ => { /* noop */ }
                         }
                     }
 
                     if let Ok(serialized) = serde_json::to_string_pretty(&json) {
-                        return TableCell::new_with_alignment(serialized, 1, Alignment::Center);
+                        return TableCell::builder(serialized).col_span(1).alignment(Alignment::Center).build();
                     }
                 }
 
-                TableCell::new_with_alignment(json, 1, Alignment::Center)
+                TableCell::builder(json).col_span(1).alignment(Alignment::Center).build()
             }
         });
 
