@@ -86,9 +86,9 @@ pub fn execute_subscription(command: SubscriptionCommand) -> Result<(), anyhow::
             let mut table = Table::new();
             table.style = markdown_style();
             table.add_row(Row::new(vec![
-                TableCell::new_with_alignment("Name", 1, Alignment::Left),
-                TableCell::new_with_alignment("ID", 1, Alignment::Left),
-                TableCell::new_with_alignment("Default", 1, Alignment::Left),
+                TableCell::builder("Name").col_span(1).alignment(Alignment::Left).build(),
+                TableCell::builder("ID").col_span(1).alignment(Alignment::Left).build(),
+                TableCell::builder("Default").col_span(1).alignment(Alignment::Left).build(),
             ]));
 
             for subscription in subscriptions {
@@ -97,17 +97,14 @@ pub fn execute_subscription(command: SubscriptionCommand) -> Result<(), anyhow::
                     .default_subscription
                     .is_some_and(|s| s == subscription.account_id);
                 table.add_row(Row::new(vec![
-                    TableCell::new_with_alignment(&subscription.account_name, 1, Alignment::Left),
-                    TableCell::new_with_alignment(
-                        &subscription.account_id.to_string(),
-                        1,
-                        Alignment::Left,
-                    ),
-                    TableCell::new_with_alignment(
-                        if is_default { "Yes" } else { "no" },
-                        1,
-                        Alignment::Left,
-                    ),
+                    
+                    TableCell::builder(&subscription.account_name).col_span(1).alignment(Alignment::Left).build(),
+                    TableCell::builder(
+                        &subscription.account_id.to_string()
+                    ).col_span(1).alignment(Alignment::Left).build(),
+                    TableCell::builder(
+                        if is_default { "Yes" } else { "no" }
+                    ).col_span(1).alignment(Alignment::Left).build(),
                 ]));
             }
 

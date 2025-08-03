@@ -1,10 +1,9 @@
 use std::collections::HashMap;
 
-use annotate_snippets::{Annotation, AnnotationType, Renderer, Slice, Snippet, SourceAnnotation};
+use annotate_snippets::{Level, Renderer, Snippet};
 
 use colored::Colorize;
 use logsh_core::{
-    common::{ErrorMessage, ErrorToken},
     config::Configuration,
     error::{ConfigError, ConnectError},
 };
@@ -99,37 +98,33 @@ pub(crate) fn print_query_error(
         logsh_core::error::QueryError::Common(logsh_core::error::CommonError::ApiError(
             bad_request,
         )) => {
-            let mut annotations = Vec::new();
-            for e in bad_request.errors.iter() {
-                for t in e.tokens.iter() {
-                    if let Some(annotation) = to_source_annotation(e, t) {
-                        annotations.push(annotation);
-                    }
-                }
-            }
-
             // This is stupid, but the library we're using is stupid.
             // You can't highlight an error which goes all the way tot he end of the line.
             // So add a tiny space to the end of the line.
             let extended_source = query.to_string() + " ";
-            let snippy = Snippet {
-                title: Some(Annotation {
-                    label: Some(bad_request.message.as_str()),
-                    id: None,
-                    annotation_type: AnnotationType::Error,
-                }),
-                footer: vec![],
-                slices: vec![Slice {
-                    source: extended_source.as_str(),
-                    line_start: 0,
-                    origin: None,
-                    fold: true,
-                    annotations,
-                }],
-            };
+            
+            let mut snippet = Snippet::source(&extended_source)
+                .line_start(1)
+                .fold(true);
+
+            for e in bad_request.errors.iter() {
+                for t in e.tokens.iter() {
+                    if let Some(label) = &e.message {
+                        snippet = snippet.annotation(
+                            Level::Error
+                                .span(t.start as usize..t.end as usize)
+                                .label(label.as_str())
+                        );
+                    }
+                }
+            }
+
+            let message = Level::Error
+                .title(&bad_request.message)
+                .snippet(snippet);
 
             let renderer = Renderer::styled();
-            println!("{}", renderer.render(snippy));
+            println!("{}", renderer.render(message));
         }
         logsh_core::error::QueryError::Connection(err) => print_connect_error(cfg, err),
         err => {
@@ -138,13 +133,3 @@ pub(crate) fn print_query_error(
     }
 }
 
-fn to_source_annotation<'a>(
-    msg: &'a ErrorMessage,
-    e: &'a ErrorToken,
-) -> Option<SourceAnnotation<'a>> {
-    msg.message.as_ref().map(|msg| SourceAnnotation {
-        label: msg.as_str(),
-        annotation_type: AnnotationType::Error,
-        range: (e.start as usize + 1, e.end as usize + 1),
-    })
-}

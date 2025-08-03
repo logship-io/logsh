@@ -267,30 +267,26 @@ fn list<W: Write>(mut write: W, mode: Option<OutputMode>) -> Result<(), Error> {
                 _ => unreachable!(),
             };
             table.add_row(Row::new(vec![
-                TableCell::new_with_alignment("Name".bright_white().bold(), 1, Alignment::Left),
-                TableCell::new_with_alignment("Server".bright_white().bold(), 1, Alignment::Center),
-                TableCell::new_with_alignment("Default".bright_white().bold(), 1, Alignment::Left),
-                TableCell::new_with_alignment(
-                    "Logged in User".bright_white().bold(),
-                    1,
-                    Alignment::Right,
-                ),
+                TableCell::builder("Name".bright_white().bold()).col_span(1).alignment(Alignment::Left).build(),
+                TableCell::builder("Server".bright_white().bold()).col_span(1).alignment(Alignment::Center).build(),
+                TableCell::builder("Default".bright_white().bold()).col_span(1).alignment(Alignment::Left).build(),
+                TableCell::builder(
+                    "Logged in User".bright_white().bold()
+                ).col_span(1).alignment(Alignment::Right).build(),
             ]));
 
             list.iter().for_each(|f| {
                 table.add_row(Row::new(vec![
-                    TableCell::new_with_alignment(&f.name.white(), 1, Alignment::Left),
-                    TableCell::new_with_alignment(&f.server.blue(), 1, Alignment::Center),
-                    TableCell::new_with_alignment(
+                    TableCell::builder(&f.name.white()).col_span(1).alignment(Alignment::Left).build(),
+                    TableCell::builder(&f.server.blue()).col_span(1).alignment(Alignment::Center).build(),
+                    TableCell::builder(
                         if f.is_default {
                             "true".green()
                         } else {
                             "false".red()
-                        },
-                        1,
-                        Alignment::Left,
-                    ),
-                    TableCell::new_with_alignment(f.username.bright_black(), 1, Alignment::Right),
+                        }
+                    ).col_span(1).alignment(Alignment::Left).build(),
+                    TableCell::builder(f.username.bright_black()).col_span(1).alignment(Alignment::Right).build(),
                 ]));
             });
 

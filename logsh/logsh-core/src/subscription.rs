@@ -29,7 +29,7 @@ pub fn delete_subscription(
     let query_url = format!("accounts/{}", subscription_id);
 
     let result = connection.execute_func(&|client| -> Result<(), error::ClientError> {
-        let _result = client.delete(&query_url)?;
+        client.delete(&query_url)?;
         Ok(())
     })?;
 

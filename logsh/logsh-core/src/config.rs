@@ -7,7 +7,7 @@ use std::{
 };
 
 use crate::{connect::Connection, error::ConfigError};
-static mut CONFIG_PATH: OnceLock<Result<PathBuf, ConfigError>> = OnceLock::new();
+static CONFIG_PATH: OnceLock<Result<PathBuf, ConfigError>> = OnceLock::new();
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Configuration {
@@ -58,8 +58,7 @@ impl Default for Configuration {
 }
 
 pub fn get_configuration_path() -> Result<PathBuf, ConfigError> {
-    let path = unsafe {
-        CONFIG_PATH.get_or_init(|| {
+    let path = CONFIG_PATH.get_or_init(|| {
             if let Ok(path) = std::env::var("LOGSH_CONFIG_PATH") {
                 if path.trim().len() > 0 {
                     log::trace!(
@@ -99,22 +98,11 @@ pub fn get_configuration_path() -> Result<PathBuf, ConfigError> {
             }
 
             Ok(path)
-        })
-    };
+        });
 
     match path {
-        Ok(p) => Ok(p.clone()),
-        Err(_e) => {
-            match unsafe { CONFIG_PATH.take() } {
-                Some(path) => {
-                    return path;
-                }
-                None => {
-                    // wtf
-                    return Err(ConfigError::InvalidConfigPath("unknown error".to_string()));
-                }
-            }
-        }
+        Ok(p) => Ok(p.into()),
+        Err(_) => Err(ConfigError::InvalidConfigPath("Failed to get config path".to_string()))
     }
 }
 

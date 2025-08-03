@@ -18,6 +18,7 @@ mod query;
 mod subscription;
 mod upload;
 mod version;
+mod whoami;
 
 #[derive(Parser)]
 #[clap(name = "logsh", author = "logship.llc", styles = styles())]
@@ -64,6 +65,7 @@ enum Commands {
     Query(crate::query::QueryCommand),
     Upload(crate::upload::UploadCommand),
     Version(crate::version::VersionCommand),
+    Whoami(crate::whoami::WhoamiCommand),
 }
 
 fn main() -> Result<(), Error> {
@@ -97,6 +99,7 @@ fn main() -> Result<(), Error> {
         }
         Some(Commands::Subscription(command)) => crate::subscription::execute_subscription(command),
         Some(Commands::Config(command)) => crate::config::execute_config(command),
+        Some(Commands::Whoami(command)) => crate::whoami::execute_whoami(command),
         None => {
             log::debug!("No arguments provided. Output status.");
             let cfg = logsh_core::config::load()?;

@@ -92,7 +92,7 @@ pub fn execute_upload<'a>(
 
     client.execute_func(&|client| -> Result<(), ClientError> {
         let file = File::open(path).map_err(|err| { ClientError::Common(CommonError::IOError(err))})?;
-        let _result = client.put(&query_url, file)?;
+        let _result: () = client.put(&query_url, file)?;
         Ok(())
     })?;
 

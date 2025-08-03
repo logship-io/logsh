@@ -3,7 +3,6 @@ use std::{collections::HashSet, ops::Add};
 use chrono::{DateTime, Utc};
 use oauth2::{
     basic::{BasicClient, BasicTokenType},
-    reqwest::http_client,
     AuthUrl, ClientId, DeviceAuthorizationUrl, EmptyExtraTokenFields, Scope,
     StandardDeviceAuthorizationResponse, StandardTokenResponse, TokenUrl,
 };
@@ -60,24 +59,27 @@ where
     match &flow {
         OAuthFlow::Device => {
             log::debug!("Initializing OAuth Device Code Flow");
+            
+            // Create HTTP client with security configuration
+            let http_client = reqwest::blocking::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .map_err(|_| AuthError::OAuth(OAuthError::MissingEndpoint("Failed to create HTTP client".to_string())))?;
+            
             let device_endpoint = device_endpoint.ok_or_else(|| {
                 AuthError::OAuth(OAuthError::MissingEndpoint("Device Authorization URL".to_string()))
             })?;
             let device_auth_url = DeviceAuthorizationUrl::new(device_endpoint.clone())
                 .map_err(|err| AuthError::OAuth(OAuthError::ParseError(err)))?;
-            let c = BasicClient::new(
-                ClientId::new(client_id.clone()),
-                None,
-                AuthUrl::new(authorize_endpoint.clone()).map_err(|err| AuthError::OAuth(OAuthError::ParseError(err)))?,
-                Some(TokenUrl::new(token_endpoint.clone()).map_err(|err| AuthError::OAuth(OAuthError::ParseError(err)))?),
-            )
-            .set_device_authorization_url(device_auth_url);
+            let c = BasicClient::new(ClientId::new(client_id.clone()))
+                .set_auth_uri(AuthUrl::new(authorize_endpoint.clone()).map_err(|err| AuthError::OAuth(OAuthError::ParseError(err)))?)
+                .set_token_uri(TokenUrl::new(token_endpoint.clone()).map_err(|err| AuthError::OAuth(OAuthError::ParseError(err)))?)
+                .set_device_authorization_url(device_auth_url);
 
             let details: StandardDeviceAuthorizationResponse = c
                 .exchange_device_code()
-                .map_err(|err| AuthError::OAuth(OAuthError::ConfigurationError(err)))?
                 .add_scopes(scopes.iter().map(|s| Scope::new(s.clone())))
-                .request(http_client)
+                .request(&http_client)
                 .map_err(|err| AuthError::OAuth(OAuthError::DeviceTokenErrorResponse(err)))?;
             println!(
                 "Open this URL in your browser: {}\nEnter the following code: {}",
@@ -87,7 +89,7 @@ where
 
             let token_result = c
                 .exchange_device_access_token(&details)
-                .request(http_client, std::thread::sleep, None)
+                .request(&http_client, std::thread::sleep, None)
                 .map_err(|err| AuthError::OAuth(OAuthError::TokenErrorResponse(err)))?;
             Ok(AuthData::OAuth {
                 expires: Some(Utc::now().add(details.expires_in())),
