@@ -1,21 +1,35 @@
 on:
   push:
-    tags: ['v[0-9].[0-9]+.[0-9]+']
-    branches: [master]
+    tags: ['v*.*.*']
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
 
-name: Logsh CLI Build and Publish
+name: Logsh CLI Build and Release
 
 jobs:
   build:
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest]
-    name: Release Packaging
+        include:
+          # Linux x86_64
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          # macOS Intel
+          - os: macos-13
+            target: x86_64-apple-darwin
+          # macOS Apple Silicon
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          # Windows x86_64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    name: Build and Package (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
     env:
       PROJECT_NAME_UNDERSCORE: logsh
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
       - name: Inject Tag Version
         if: startsWith(github.ref, 'refs/tags/v')
@@ -27,59 +41,61 @@ jobs:
           echo "----------------------------------------"
           cat ./logsh/Cargo.toml
 
-      - uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          profile: minimal
           toolchain: stable
-          override: true
+          targets: ${{ matrix.target }}
       
-      - name: Release Build
-        run: cargo build --release
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
         working-directory: ./logsh
       
       - name: 'Upload Artifact'
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
-          name: logsh-cli
+          name: logsh-cli-${{ matrix.target }}
           path: |
-            logsh/target/release/${{ env.PROJECT_NAME_UNDERSCORE }}
-            logsh/target/release/${{ env.PROJECT_NAME_UNDERSCORE }}.exe
-  upload:
-    name: Create release and upload
+            logsh/target/${{ matrix.target }}/release/${{ env.PROJECT_NAME_UNDERSCORE }}
+            logsh/target/${{ matrix.target }}/release/${{ env.PROJECT_NAME_UNDERSCORE }}.exe
+
+  prerelease:
+    name: Create pre-release
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      
+      - name: Create pre-release
+        uses: marvinpinto/action-automatic-releases@latest
+        with:
+          repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          automatic_release_tag: "latest-pre"
+          prerelease: true
+          title: "Development Build"
+          files: |
+            artifacts/**/*
+
+  release:
+    name: Create release
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
         with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
-          draft: false
-          prerelease: false
+          path: artifacts
       
-      - name: Downloading artifacts
-        uses: actions/download-artifact@v3
-        if: startsWith(github.ref, 'refs/tags/')
-        with:
-          name: logsh-cli
-          path: logsh-cli
-      
-      - name: Generate Changelog
-        run: git log $(git describe --tags --abbrev=0 HEAD^)..HEAD > ${{ github.workspace }}-CHANGELOG.txt
-      
-      - name: Upload Artifact
-        id: upload-release-asset
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Create release
         uses: softprops/action-gh-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          body_path: ${{ github.workspace }}-CHANGELOG.txt
-          files: logsh-cli/*
+          files: artifacts/**/*
+          generate_release_notes: true
