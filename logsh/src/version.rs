@@ -10,8 +10,15 @@ mod build {
 #[derive(Debug, clap::Args)]
 #[clap(about = "logsh version information")]
 pub struct VersionCommand {
-    #[arg(long, group = "update-g", help = "Update to the latest release.")]
+    #[arg(long, group = "update-g", help = "Update to the latest release version.")]
     update: bool,
+
+    #[arg(
+        long,
+        group = "update-g", 
+        help = "Update to the latest pre-release version."
+    )]
+    update_prerelease: bool,
 
     #[arg(
         short,
@@ -53,21 +60,30 @@ pub fn version<W: Write>(mut write: W, command: VersionCommand, level: u8) -> Re
     )
     .map_err(|e| anyhow!("Failed to write version: {}", e))?;
 
-    if command.update {
+    if command.update || command.update_prerelease {
         log::info!("Checking for updates...");
-        let latest = self_update::backends::github::Update::configure()
+        let updater = self_update::backends::github::Update::configure()
             .repo_owner("logship-io")
             .repo_name("logsh")
             .bin_name("logsh")
             .show_download_progress(true)
             .current_version(build::VERSION)
-            .build()?
-            .get_latest_release()?;
+            .build()?;
+        
+        let latest = if command.update_prerelease {
+            // For prereleases, get the latest release (which includes prereleases) from "latest" tag
+            updater.get_release_version("latest")?
+        } else {
+            // For stable releases, get the latest non-prerelease
+            updater.get_latest_release()?
+        };
 
         if latest.version == build::VERSION {
+            let update_type = if command.update_prerelease { "prerelease" } else { "release" };
             writeln!(
                 write,
-                "Matching latest version: v{}. You're up to date!",
+                "Matching latest {} version: v{}. You're up to date!",
+                update_type,
                 build::VERSION
             )?;
             return Ok(());
