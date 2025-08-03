@@ -27,6 +27,15 @@ pub struct VersionCommand {
         help = "Use with '--update' to skip approval checks."
     )]
     yes: bool,
+
+    #[arg(
+        long,
+        env = "LOGSH_UPDATE_REPOSITORY",
+        requires = "update-g",
+        help = "Custom GitHub repository for updates (format: owner/repo). Can also be set via LOGSH_UPDATE_REPOSITORY environment variable."
+    )]
+    repo: Option<String>,
+
 }
 
 pub fn version<W: Write>(mut write: W, command: VersionCommand, level: u8) -> Result<(), Error> {
@@ -62,17 +71,30 @@ pub fn version<W: Write>(mut write: W, command: VersionCommand, level: u8) -> Re
 
     if command.update || command.update_prerelease {
         log::info!("Checking for updates...");
+        
+        // Parse custom repository or use default
+        let (repo_owner, repo_name) = if let Some(repo) = &command.repo {
+            let parts: Vec<&str> = repo.split('/').collect();
+            if parts.len() != 2 {
+                return Err(anyhow!("Invalid repository format. Use 'owner/repo'"));
+            }
+            (parts[0].to_string(), parts[1].to_string())
+        } else {
+            ("logship-io".to_string(), "logsh".to_string())
+        };
+
+        log::info!("Using repository: {}/{}", repo_owner, repo_name);
         let updater = self_update::backends::github::Update::configure()
-            .repo_owner("logship-io")
-            .repo_name("logsh")
+            .repo_owner(&repo_owner)
+            .repo_name(&repo_name)
             .bin_name("logsh")
             .show_download_progress(true)
             .current_version(build::VERSION)
             .build()?;
         
         let latest = if command.update_prerelease {
-            // For prereleases, get the latest release (which includes prereleases) from "latest" tag
-            updater.get_release_version("latest")?
+            // For prereleases, get the latest pre-release from "latest-pre" tag
+            updater.get_release_version("latest-pre")?
         } else {
             // For stable releases, get the latest non-prerelease
             updater.get_latest_release()?
@@ -89,12 +111,28 @@ pub fn version<W: Write>(mut write: W, command: VersionCommand, level: u8) -> Re
             return Ok(());
         }
 
+        // Determine the target architecture for this binary
+        let target = if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
+            "x86_64-pc-windows-msvc"
+        } else if cfg!(all(target_os = "windows", target_arch = "aarch64")) {
+            "aarch64-pc-windows-msvc"
+        } else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+            "x86_64-unknown-linux-gnu"
+        } else if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
+            "aarch64-unknown-linux-gnu"
+        } else if cfg!(all(target_os = "linux", target_arch = "arm")) {
+            "armv7-unknown-linux-gnueabihf"
+        } else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+            "x86_64-apple-darwin"
+        } else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+            "aarch64-apple-darwin"
+        } else {
+            return Err(anyhow!("Unsupported platform for self-update"));
+        };
+
+        let expected_asset_name = format!("logsh-cli-{}.zip", target);
         let asset = latest.assets.iter().find(|a| {
-            if cfg!(windows) {
-                a.name == "logsh.exe"
-            } else {
-                a.name == "logsh"
-            }
+            a.name == expected_asset_name
         });
 
         if let Some(asset) = asset {
@@ -145,19 +183,27 @@ pub fn version<W: Write>(mut write: W, command: VersionCommand, level: u8) -> Re
                 asset.download_url
             );
 
-            let path = tempfile::Builder::new()
+            let tmp_dir = tempfile::Builder::new()
                 .prefix(&format!("logsh_update_{}_", latest.version))
                 .tempdir_in(::std::env::current_dir()?)?;
-            let path = path.path().join(&asset.name);
-            log::debug!("Temporary asset path: {:?}", path);
-            let empty = ::std::fs::File::create(&path)?;
+
+            let archive_file = tmp_dir.path().join(&asset.name);
+            let archive = ::std::fs::File::create(&archive_file)?;
 
             self_update::Download::from_url(&asset.download_url)
                 .set_header(reqwest::header::ACCEPT, "application/octet-stream".parse()?)
                 .show_progress(true)
-                .download_to(&empty)?;
+                .download_to(&archive)?;
 
-            self_replace::self_replace(path)?;
+            // Extract and replace - self_update handles zip files automatically
+            self_update::Extract::from_source(&archive_file)
+                .archive(self_update::ArchiveKind::Zip)
+                .extract_into(&tmp_dir.path())?;
+
+            let bin_name = if cfg!(windows) { "logsh.exe" } else { "logsh" };
+            let new_exe = tmp_dir.path().join(bin_name);
+
+            self_replace::self_replace(new_exe)?;
         } else {
             return Err(anyhow!("Could not locate latest assets!"));
         }
