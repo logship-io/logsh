@@ -1,0 +1,27 @@
+# Git
+.git
+.gitignore
+
+# Documentation
+README.md
+CLAUDE.md
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+target/
+*/target/
+Cargo.lock
+
+# Docker files
+Dockerfile
+.dockerignore
+
+# GitHub workflows (not needed in container)
+.github/
