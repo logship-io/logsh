@@ -12,30 +12,30 @@ jobs:
     strategy:
       matrix:
         include:
-          # Linux builds
+          # Linux builds (use cross for ARM, native for x86_64)
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            arch: x86_64
+            use_cross: false
           - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
-            arch: aarch64
+            use_cross: true
           - os: ubuntu-latest
             target: armv7-unknown-linux-gnueabihf
-            arch: armv7
-          # macOS builds
+            use_cross: true
+          # macOS builds (native compilation only)
           - os: macos-latest
             target: x86_64-apple-darwin
-            arch: x86_64
+            use_cross: false
           - os: macos-latest
             target: aarch64-apple-darwin
-            arch: aarch64
-          # Windows builds
+            use_cross: false
+          # Windows builds (native compilation only)
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            arch: x86_64
+            use_cross: false
           - os: windows-latest
             target: aarch64-pc-windows-msvc
-            arch: aarch64
+            use_cross: false
     name: Build and Package (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
     env:
@@ -53,37 +53,25 @@ jobs:
           echo "----------------------------------------"
           cat ./logsh/Cargo.toml
 
-      - name: Install system dependencies (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libssl-dev pkg-config
-
-      - name: Install system dependencies (macOS)
-        if: matrix.os == 'macos-latest'
-        run: |
-          brew install openssl
-          echo "OPENSSL_ROOT_DIR=$(brew --prefix openssl)" >> $GITHUB_ENV
-
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
       
       - name: Install cross-compilation tool
-        if: matrix.target != 'x86_64-unknown-linux-gnu' && matrix.os == 'ubuntu-latest'
+        if: matrix.use_cross
         run: |
           cargo install cross --git https://github.com/cross-rs/cross
       
-      - name: Release Build (Cross-compilation)
-        if: matrix.target != 'x86_64-unknown-linux-gnu' && matrix.os == 'ubuntu-latest'
+      - name: Build with cross
+        if: matrix.use_cross
         run: cross build --release --target ${{ matrix.target }}
         working-directory: ./logsh
         env:
           CROSS_CONTAINER_IN_CONTAINER: true
       
-      - name: Release Build (Native)
-        if: matrix.target == 'x86_64-unknown-linux-gnu' || matrix.os != 'ubuntu-latest'
+      - name: Build with cargo
+        if: matrix.use_cross == false
         run: cargo build --release --target ${{ matrix.target }}
         working-directory: ./logsh
       
