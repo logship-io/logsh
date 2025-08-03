@@ -50,10 +50,10 @@ logsh query -q "Logship.Agent.Uptime | limit 100" --output json
 ### Basic Usage
 ```bash
 # Show help
-podman run --rm logsh:latest
+podman run --rm ghcr.io/logship-io/logsh:latest
 
 # Show version
-podman run --rm logsh:latest version
+podman run --rm ghcr.io/logship-io/logsh:latest version
 ```
 
 ## Configuration Management
