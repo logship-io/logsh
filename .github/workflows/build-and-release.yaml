@@ -50,13 +50,23 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }}
         working-directory: ./logsh
       
+      - name: Prepare artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path artifacts -Force
+          if ("${{ matrix.os }}" -eq "windows-latest") {
+            $binaryPath = "logsh/target/${{ matrix.target }}/release/logsh.exe"
+          } else {
+            $binaryPath = "logsh/target/${{ matrix.target }}/release/logsh"
+          }
+          $zipPath = "artifacts/logsh-${{ matrix.target }}.zip"
+          Compress-Archive -Path $binaryPath -DestinationPath $zipPath
+      
       - name: 'Upload Artifact'
         uses: actions/upload-artifact@v4
         with:
           name: logsh-cli-${{ matrix.target }}
-          path: |
-            logsh/target/${{ matrix.target }}/release/${{ env.PROJECT_NAME_UNDERSCORE }}
-            logsh/target/${{ matrix.target }}/release/${{ env.PROJECT_NAME_UNDERSCORE }}.exe
+          path: artifacts/
 
   prerelease:
     name: Create pre-release

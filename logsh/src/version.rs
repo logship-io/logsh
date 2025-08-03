@@ -130,9 +130,10 @@ pub fn version<W: Write>(mut write: W, command: VersionCommand, level: u8) -> Re
             return Err(anyhow!("Unsupported platform for self-update"));
         };
 
-        let expected_asset_name = format!("logsh-cli-{}.zip", target);
+        let expected_zip_name = format!("logsh-{}.zip", target);
+
         let asset = latest.assets.iter().find(|a| {
-            a.name == expected_asset_name
+            a.name == expected_zip_name
         });
 
         if let Some(asset) = asset {
@@ -187,23 +188,34 @@ pub fn version<W: Write>(mut write: W, command: VersionCommand, level: u8) -> Re
                 .prefix(&format!("logsh_update_{}_", latest.version))
                 .tempdir_in(::std::env::current_dir()?)?;
 
+            // Download the archive file
             let archive_file = tmp_dir.path().join(&asset.name);
-            let archive = ::std::fs::File::create(&archive_file)?;
+            let file = ::std::fs::File::create(&archive_file)?;
 
             self_update::Download::from_url(&asset.download_url)
                 .set_header(reqwest::header::ACCEPT, "application/octet-stream".parse()?)
                 .show_progress(true)
-                .download_to(&archive)?;
+                .download_to(&file)?;
 
-            // Extract and replace - self_update handles zip files automatically
+            // Extract the binary from zip
             self_update::Extract::from_source(&archive_file)
                 .archive(self_update::ArchiveKind::Zip)
                 .extract_into(&tmp_dir.path())?;
 
-            let bin_name = if cfg!(windows) { "logsh.exe" } else { "logsh" };
-            let new_exe = tmp_dir.path().join(bin_name);
+            // Find the extracted binary
+            let binary_name = if cfg!(windows) { "logsh.exe" } else { "logsh" };
+            let binary_file = tmp_dir.path().join(binary_name);
 
-            self_replace::self_replace(new_exe)?;
+            // Make executable on Unix systems
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = std::fs::metadata(&binary_file)?.permissions();
+                perms.set_mode(0o755);
+                std::fs::set_permissions(&binary_file, perms)?;
+            }
+
+            self_replace::self_replace(binary_file)?;
         } else {
             return Err(anyhow!("Could not locate latest assets!"));
         }
