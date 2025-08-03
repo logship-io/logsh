@@ -29,11 +29,9 @@ jobs:
           echo "----------------------------------------"
           cat ./logsh/Cargo.toml
 
-      - uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          profile: minimal
           toolchain: stable
-          override: true
       
       - name: Release Build
         run: cargo build --release
