@@ -16,6 +16,9 @@ pub struct UploadCommand {
         default_value = "none"
     )]
     timeout: OptionalDurationArg,
+
+    #[arg(long, help = "Pretty print upload progress.")]
+    progress: bool,
 }
 
 pub fn execute_upload(args: UploadCommand) -> Result<(), Error> {
@@ -25,6 +28,12 @@ pub fn execute_upload(args: UploadCommand) -> Result<(), Error> {
         .get(&cfg.default_connection)
         .or_else(|| cfg.connections.values().next())
         .ok_or(anyhow::anyhow!("Connection does not exist"))?;
-    logsh_core::upload::execute(&args.schema, &args.path, connection, args.timeout.into())?;
+    logsh_core::upload::execute(
+        &args.schema,
+        &args.path,
+        connection,
+        args.timeout.into(),
+        args.progress,
+    )?;
     Ok(())
 }
