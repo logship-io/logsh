@@ -8,20 +8,20 @@ fn main() -> Result<(), Error> {
     println!("cargo:rerun-if-changed=Cargo.toml");
 
     let cargo = std::fs::read_to_string("Cargo.toml")
-        .map_err(|e| anyhow!("Failed to read Cargo.toml: {}", e))?;
+        .map_err(|e| anyhow!("Failed to read Cargo.toml: {e}"))?;
     let cargo: Table =
-        toml::from_str(&cargo).map_err(|e| anyhow!("Failed to parse Cargo.toml: {}", e))?;
+        toml::from_str(&cargo).map_err(|e| anyhow!("Failed to parse Cargo.toml: {e}"))?;
 
     let path = std::env::var("OUT_DIR")?;
-    let path = format!("{}/package_info.gen.rs", path);
+    let path = format!("{path}/package_info.gen.rs");
     write_build_info(path, cargo)
-        .map_err(|e| anyhow!("Failed to output build info module: {}", e))?;
+        .map_err(|e| anyhow!("Failed to output build info module: {e}"))?;
     Ok(())
 }
 
 fn write_build_info<P: AsRef<Path>>(path: P, table: Table) -> Result<(), Error> {
     let path = path.as_ref();
-    let mut file = File::create(path).map_err(|e| anyhow!("Failed to create {:?}: {}", path, e))?;
+    let mut file = File::create(path).map_err(|e| anyhow!("Failed to create {path:?}: {e}"))?;
     let mut s = String::new();
     let package = table
         .get("package")

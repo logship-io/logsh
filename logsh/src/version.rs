@@ -1,6 +1,8 @@
 use anyhow::{anyhow, Error};
 use std::io::Write;
 
+use crate::OutputMode;
+
 #[cfg(feature = "self-update")]
 use std::io::stdin;
 
@@ -16,13 +18,17 @@ mod build {
 #[clap(about = "logsh version information")]
 pub struct VersionCommand {
     #[cfg(feature = "self-update")]
-    #[arg(long, group = "update-g", help = "Update to the latest release version.")]
+    #[arg(
+        long,
+        group = "update-g",
+        help = "Update to the latest release version."
+    )]
     update: bool,
 
     #[cfg(feature = "self-update")]
     #[arg(
         long,
-        group = "update-g", 
+        group = "update-g",
         help = "Update to the latest pre-release version."
     )]
     update_prerelease: bool,
@@ -46,7 +52,35 @@ pub struct VersionCommand {
     repo: Option<String>,
 }
 
-pub fn version<W: Write>(mut write: W, _command: VersionCommand, level: u8) -> Result<(), Error> {
+pub fn version<W: Write>(
+    mut write: W,
+    _command: VersionCommand,
+    level: u8,
+    output: Option<OutputMode>,
+) -> Result<(), Error> {
+    if let Some(OutputMode::Json | OutputMode::JsonPretty) = output {
+        let json = serde_json::json!({
+            "package": build::NAME,
+            "version": build::VERSION,
+            "edition": build::EDITION,
+        });
+        if matches!(output, Some(OutputMode::JsonPretty)) {
+            writeln!(
+                write,
+                "{}",
+                serde_json::to_string_pretty(&json).unwrap_or_default()
+            )
+        } else {
+            writeln!(
+                write,
+                "{}",
+                serde_json::to_string(&json).unwrap_or_default()
+            )
+        }
+        .map_err(|e| anyhow!("Failed to write version: {e}"))?;
+        return Ok(());
+    }
+
     let mut welcome = String::from("\n");
 
     if level > 0 {
@@ -75,7 +109,7 @@ pub fn version<W: Write>(mut write: W, _command: VersionCommand, level: u8) -> R
         build::VERSION,
         build::EDITION,
     )
-    .map_err(|e| anyhow!("Failed to write version: {}", e))?;
+    .map_err(|e| anyhow!("Failed to write version: {e}"))?;
 
     #[cfg(feature = "self-update")]
     {
@@ -90,7 +124,7 @@ pub fn version<W: Write>(mut write: W, _command: VersionCommand, level: u8) -> R
 #[cfg(feature = "self-update")]
 fn run_self_update<W: Write>(write: &mut W, command: &VersionCommand) -> Result<(), Error> {
     log::info!("Checking for updates...");
-    
+
     // Parse custom repository or use default
     let (repo_owner, repo_name) = if let Some(repo) = &command.repo {
         let parts: Vec<&str> = repo.split('/').collect();
@@ -102,7 +136,7 @@ fn run_self_update<W: Write>(write: &mut W, command: &VersionCommand) -> Result<
         ("logship-io".to_string(), "logsh".to_string())
     };
 
-    log::info!("Using repository: {}/{}", repo_owner, repo_name);
+    log::info!("Using repository: {repo_owner}/{repo_name}");
     let updater = self_update::backends::github::Update::configure()
         .repo_owner(&repo_owner)
         .repo_name(&repo_name)
@@ -110,7 +144,7 @@ fn run_self_update<W: Write>(write: &mut W, command: &VersionCommand) -> Result<
         .show_download_progress(true)
         .current_version(build::VERSION)
         .build()?;
-    
+
     let latest = if command.update_prerelease {
         // For prereleases, get the latest pre-release from "latest-pre" tag
         updater.get_release_version("latest-pre")?
@@ -120,7 +154,11 @@ fn run_self_update<W: Write>(write: &mut W, command: &VersionCommand) -> Result<
     };
 
     if latest.version == build::VERSION {
-        let update_type = if command.update_prerelease { "prerelease" } else { "release" };
+        let update_type = if command.update_prerelease {
+            "prerelease"
+        } else {
+            "release"
+        };
         writeln!(
             write,
             "Matching latest {} version: v{}. You're up to date!",
@@ -149,18 +187,16 @@ fn run_self_update<W: Write>(write: &mut W, command: &VersionCommand) -> Result<
         return Err(anyhow!("Unsupported platform for self-update"));
     };
 
-    let expected_zip_name = format!("logsh-{}.zip", target);
+    let expected_zip_name = format!("logsh-{target}.zip");
 
-    let asset = latest.assets.iter().find(|a| {
-        a.name == expected_zip_name
-    });
+    let asset = latest.assets.iter().find(|a| a.name == expected_zip_name);
 
     if let Some(asset) = asset {
         log::info!("Release Name: {}", latest.name);
         log::info!("Release Date: {}", latest.date);
         match latest.body {
             Some(body) if !body.trim().is_empty() => {
-                log::info!("Release Body: {}", body);
+                log::info!("Release Body: {body}");
             }
             _ => {}
         };
@@ -185,12 +221,12 @@ fn run_self_update<W: Write>(write: &mut W, command: &VersionCommand) -> Result<
                     log::info!("User approved version update to v{}.", latest.version);
                 }
                 "n" | "no" => {
-                    log::debug!("Update manually declined, valid no response: \"{}\"", buf);
+                    log::debug!("Update manually declined, valid no response: \"{buf}\"");
                     log::info!("User declined logsh version update to v{}.", latest.version);
                     return Ok(());
                 }
                 _ => {
-                    log::warn!("User input was trash. Expected 'n', \"no\", 'y', or \"yes\". Received \"{}\"", buf);
+                    log::warn!("User input was trash. Expected 'n', \"no\", 'y', or \"yes\". Received \"{buf}\"");
                     log::info!("Exiting logsh version update.");
                     return Ok(());
                 }
@@ -212,14 +248,17 @@ fn run_self_update<W: Write>(write: &mut W, command: &VersionCommand) -> Result<
         let file = ::std::fs::File::create(&archive_file)?;
 
         self_update::Download::from_url(&asset.download_url)
-            .set_header(reqwest::header::ACCEPT, "application/octet-stream".parse()?)
+            .set_header(
+                logsh_core::reqwest::header::ACCEPT,
+                "application/octet-stream".parse()?,
+            )
             .show_progress(true)
             .download_to(&file)?;
 
         // Extract the binary from zip
         self_update::Extract::from_source(&archive_file)
             .archive(self_update::ArchiveKind::Zip)
-            .extract_into(&tmp_dir.path())?;
+            .extract_into(tmp_dir.path())?;
 
         // Find the extracted binary
         let binary_name = if cfg!(windows) { "logsh.exe" } else { "logsh" };

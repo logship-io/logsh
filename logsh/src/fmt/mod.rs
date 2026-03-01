@@ -3,11 +3,11 @@ use std::collections::HashMap;
 use annotate_snippets::{Level, Renderer, Snippet};
 
 use colored::Colorize;
+use logsh_core::reqwest::StatusCode;
 use logsh_core::{
     config::Configuration,
     error::{ConfigError, ConnectError},
 };
-use reqwest::StatusCode;
 use serde::Serialize;
 
 pub mod parse;
@@ -17,8 +17,10 @@ pub mod parse;
 pub struct Connection {
     pub name: String,
     pub server: String,
-    pub is_default: bool,
+    pub is_current_context: bool,
     pub username: String,
+    pub current_account: String,
+    pub accounts: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -28,63 +30,70 @@ pub struct DataFrame {
     pub data: Vec<HashMap<String, serde_json::Value>>,
 }
 
+/// Write a compact JSON line to stdout.
+pub fn print_json<T: Serialize>(value: &T) {
+    if let Ok(json) = serde_json::to_string(value) {
+        println!("{json}");
+    }
+}
+
+/// Write a pretty-printed JSON value to stdout.
+pub fn print_json_pretty<T: Serialize>(value: &T) {
+    if let Ok(json) = serde_json::to_string_pretty(value) {
+        println!("{json}");
+    }
+}
+
 pub fn print_connect_error(cfg: &Configuration, err: &ConnectError) {
     match err {
         ConnectError::Config(err) => print_config_error(err),
-        ConnectError::NoConnection(str) => {
-            println!(
-                "Error: {}{}\" exists.",
-                "No connection with name \"".red(),
-                str.yellow().dimmed()
+        ConnectError::NoConnection(name) => {
+            eprintln!("{} No context named \"{}\".", "Error:".red(), name.yellow());
+            eprintln!(
+                "Run {} to see available contexts.",
+                "logsh context list".blue()
             );
-            println!("{}   ", "# Execute logsh".bright_black())
         }
         ConnectError::Network(err) => print_reqwest_error(cfg, err),
         err => {
-            println!("{} {}", "Error:".red(), err.to_string().bright_red());
-            print_add_connection_help();
+            eprintln!("{} {}", "Error:".red(), err.to_string().bright_red());
         }
     }
 }
 
-fn print_reqwest_error(cfg: &Configuration, err: &reqwest::Error) {
+fn print_reqwest_error(_cfg: &Configuration, err: &logsh_core::reqwest::Error) {
     match err.status() {
         Some(StatusCode::UNAUTHORIZED) => {
-            println!("{} {}", "Error:".red(), "User Unauthorized".yellow());
-            println!("Login with {}.", "logsh conn login".magenta().bold());
-            if cfg.connections.len() > 1 {
-                println!(
-                    "{} {} {}",
-                    "# Execute".bright_black(),
-                    "logsh conn ls".blue(),
-                    "to view available connections.".bright_black()
-                );
-            }
-
-            print_add_connection_help();
+            eprintln!("{} {}", "Error:".red(), "User Unauthorized".yellow());
+            eprintln!(
+                "Run {} to re-authenticate.",
+                "logsh context login".magenta().bold()
+            );
         }
         Some(code) => {
-            println!("{} {}", "Error:".red(), code.as_str().yellow());
-            print_add_connection_help();
+            eprintln!(
+                "{} {} ({})",
+                "Error:".red(),
+                "Request failed".red(),
+                code.as_str().yellow()
+            );
         }
         None => {
-            println!("{} {}", "Error:".red(), "Unable to connect".red());
-            print_add_connection_help();
+            eprintln!(
+                "{} {}",
+                "Error:".red(),
+                "Unable to connect — check your server URL.".red()
+            );
         }
     }
 }
 
 pub fn print_add_connection_help() {
-    println!(
-        "{} {} {}",
-        "# Execute".bright_black(),
-        "logsh conn add --help".blue(),
-        "for help with adding connections.".bright_black()
-    );
+    eprintln!("Run {} to get started.", "logsh context add --help".blue(),);
 }
 
 pub(crate) fn print_config_error(err: &ConfigError) {
-    println!("{} {}", "Error:".red(), err.to_string().red(),);
+    eprintln!("{} {}", "Error:".red(), err.to_string().red());
 }
 
 pub(crate) fn print_query_error(
@@ -102,10 +111,8 @@ pub(crate) fn print_query_error(
             // You can't highlight an error which goes all the way tot he end of the line.
             // So add a tiny space to the end of the line.
             let extended_source = query.to_string() + " ";
-            
-            let mut snippet = Snippet::source(&extended_source)
-                .line_start(1)
-                .fold(true);
+
+            let mut snippet = Snippet::source(&extended_source).line_start(1).fold(true);
 
             for e in bad_request.errors.iter() {
                 for t in e.tokens.iter() {
@@ -113,23 +120,20 @@ pub(crate) fn print_query_error(
                         snippet = snippet.annotation(
                             Level::Error
                                 .span(t.start as usize..t.end as usize)
-                                .label(label.as_str())
+                                .label(label.as_str()),
                         );
                     }
                 }
             }
 
-            let message = Level::Error
-                .title(&bad_request.message)
-                .snippet(snippet);
+            let message = Level::Error.title(&bad_request.message).snippet(snippet);
 
             let renderer = Renderer::styled();
-            println!("{}", renderer.render(message));
+            eprintln!("{}", renderer.render(message));
         }
         logsh_core::error::QueryError::Connection(err) => print_connect_error(cfg, err),
         err => {
-            println!("{} {}", "Error:".red(), err.to_string().red(),);
+            eprintln!("{} {}", "Error:".red(), err.to_string().red());
         }
     }
 }
-

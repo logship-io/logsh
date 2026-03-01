@@ -19,8 +19,8 @@ target/
 */target/
 Cargo.lock
 
-# Docker files
-Dockerfile
+# Container files
+Containerfile
 .dockerignore
 
 # GitHub workflows (not needed in container)

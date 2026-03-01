@@ -2,6 +2,7 @@ use thiserror::Error;
 
 use crate::common::ApiErrorModel;
 
+/// General-purpose errors such as missing files, empty arguments, and API failures.
 #[derive(Debug, Error)]
 pub enum CommonError {
     #[error("File not found: {0}")]
@@ -23,6 +24,7 @@ pub enum CommonError {
     Json(#[from] serde_json::Error),
 }
 
+/// Errors related to configuration loading, saving, and path resolution.
 #[derive(Debug, Error)]
 pub enum ConfigError {
     #[error("Unable to determine home directory")]
@@ -53,6 +55,7 @@ pub enum ConfigError {
     NoDefaultAccount,
 }
 
+/// Errors produced by [`LogshClient`](crate::logship_client::LogshClient) operations.
 #[derive(Debug, Error)]
 pub enum ClientError {
     #[error("{0}")]
@@ -69,6 +72,7 @@ pub enum ClientError {
     NoToken,
 }
 
+/// Errors that can occur when executing a query.
 #[derive(Debug, Error)]
 pub enum QueryError {
     #[error("{0}")]
@@ -96,6 +100,7 @@ pub enum QueryError {
     Json(#[from] serde_json::Error),
 }
 
+/// Errors that can occur during file upload.
 #[derive(Debug, Error)]
 pub enum UploadError {
     #[error("{0}")]
@@ -121,6 +126,7 @@ pub enum UploadError {
     FileIO(#[from] std::io::Error),
 }
 
+/// Errors that can occur when establishing or refreshing a connection.
 #[derive(Debug, Error)]
 pub enum ConnectError {
     #[error("Configuration Error: {0}")]
@@ -148,6 +154,7 @@ pub enum ConnectError {
     InvalidConfigError(String),
 }
 
+/// Top-level authentication errors wrapping JWT and OAuth failures.
 #[derive(Debug, Error)]
 pub enum AuthError {
     #[error("The specified authentication has timed out and cannot be automatically refreshed.")]
@@ -160,12 +167,14 @@ pub enum AuthError {
     OAuth(#[from] OAuthError),
 }
 
+/// Errors specific to username/password (basic) authentication.
 #[derive(Debug, Error)]
 pub enum BasicAuthError {
     #[error("IO Error: {0}")]
     IOError(#[from] std::io::Error),
 }
 
+/// Errors specific to the OAuth authentication flow.
 #[derive(Debug, Error)]
 pub enum OAuthError {
     #[error("URL Parse Error: {0}")]
@@ -178,7 +187,7 @@ pub enum OAuthError {
     DeviceTokenErrorResponse(
         #[from]
         oauth2::RequestTokenError<
-            oauth2::HttpClientError<reqwest::Error>,
+            oauth2::HttpClientError<oauth2::reqwest::Error>,
             oauth2::StandardErrorResponse<oauth2::basic::BasicErrorResponseType>,
         >,
     ),
@@ -187,7 +196,7 @@ pub enum OAuthError {
     TokenErrorResponse(
         #[from]
         oauth2::RequestTokenError<
-            oauth2::HttpClientError<reqwest::Error>,
+            oauth2::HttpClientError<oauth2::reqwest::Error>,
             oauth2::StandardErrorResponse<oauth2::DeviceCodeErrorResponseType>,
         >,
     ),
@@ -196,6 +205,7 @@ pub enum OAuthError {
     MissingEndpoint(String),
 }
 
+/// Errors that can occur during the login workflow.
 #[derive(Debug, Error)]
 pub enum LoginError {
     #[error("Configuration error during login: {0}")]
@@ -217,6 +227,7 @@ pub enum LoginError {
     TokenResponseError,
 }
 
+/// Errors related to account operations.
 #[derive(Debug, Error)]
 pub enum AccountError {
     #[error("Client error during login: {0}")]

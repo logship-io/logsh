@@ -1,184 +1,193 @@
 # logsh - Logship CLI
 
-A command-line interface for interacting with [logship](https://logship.io). The `logsh` CLI provides powerful tools for managing connections, querying logs, uploading data, and managing subscriptions.
+A command-line interface for interacting with [Logship](https://logship.io). Query logs, upload data, manage connections and accounts — designed for both human users and CI/automation pipelines.
 
 ## Quick Start
 
-1. **Check Status**: `logsh` without arguments or `logsh whoami`
-2. **Add Connection**: `logsh connection add basic <name> <url>`
-3. **Query Logs**: `logsh query -q "Logship.Agent.Uptime | limit 100"`
+```bash
+# Add a context
+logsh context add basic myctx https://my.logship.server
+
+# Check status
+logsh whoami
+
+# Query logs
+logsh query -q 'MyTable | take 10'
+
+# Upload CSV data
+logsh upload my_table data.csv
+```
+
+## Installation
+
+### Pre-built Binaries
+
+Download from [Releases](https://github.com/logship-io/logsh/releases) for your platform:
+
+| Platform | Architecture |
+|----------|-------------|
+| Linux | x86_64, aarch64, armv7 (RPi), arm, musl (static) |
+| macOS | x86_64 (Intel), aarch64 (Apple Silicon) |
+| Windows | x86_64, aarch64 |
+| FreeBSD | x86_64 |
+
+### Container
+
+```bash
+docker run --rm ghcr.io/logship-io/logsh:latest --help
+```
+
+Multi-arch images available: `linux/amd64`, `linux/arm64`, `linux/arm/v7`
+
+### Self-Update
+
+```bash
+logsh version --update       # Latest stable
+logsh version --update-prerelease  # Latest dev build
+```
 
 ## Usage
 
+### Contexts
+
 ```bash
-# Show help and available commands
-logsh --help
+# Add with username/password
+logsh context add basic prod https://logship.example.com
 
-# Check connection status and current user
-logsh
-logsh whoami
+# Add with Personal Access Token (CI/automation)
+logsh context add pat ci-ctx https://logship.example.com -t $LOGSH_PAT_TOKEN
 
-# Configure connections
-logsh connection list
+# Add with OAuth device flow
+logsh context add oauth myctx https://logship.example.com
 
-# Query logs
-logsh query -q "Logship.Agent.Uptime | limit 100"
+# List contexts
+logsh context list
+logsh context list -o json   # Machine-readable
 
-# Upload CSV data
-logsh upload data.csv
+# Switch context
+logsh context use prod
 
-# Manage accounts
+# Re-authenticate
+logsh context login
+```
+
+### Queries
+
+```bash
+# Interactive query
+logsh query -q 'MyTable | take 10'
+
+# From stdin (pipe-friendly)
+echo 'MyTable | count' | logsh query
+
+# Output formats: table (default), json, json-pretty, csv, markdown
+logsh query -q 'MyTable | take 5' -o json
+logsh query -q 'MyTable | take 5' -o csv > output.csv
+
+# Custom timeout
+logsh query -q 'BigTable | summarize count() by bin(timestamp, 1h)' -t 5m
+```
+
+### Data Upload
+
+```bash
+# Upload CSV
+logsh upload my_schema data.csv
+
+# Upload TSV with progress
+logsh upload my_schema data.tsv --progress
+```
+
+### Accounts
+
+```bash
 logsh account list
-logsh account default <name>
-
-# Version information and updates
-logsh version
-logsh version update
+logsh account list --include-all
+logsh account default <account-id>
 ```
 
-### Output Formats
-
-All query and list commands support multiple output formats:
+### Shell Completions
 
 ```bash
-# JSON
-logsh query -q "Logship.Agent.Uptime | limit 100" --output json
+# Bash
+logsh completions bash > ~/.local/share/bash-completion/completions/logsh
+
+# Zsh
+logsh completions zsh > ~/.zfunc/_logsh
+
+# Fish
+logsh completions fish > ~/.config/fish/completions/logsh.fish
+
+# PowerShell
+logsh completions powershell >> $PROFILE
 ```
 
-## Container Quick Start
+### Global Flags
 
-### Basic Usage
-```bash
-# Show help
-podman run --rm ghcr.io/logship-io/logsh:latest
-
-# Show version
-podman run --rm ghcr.io/logship-io/logsh:latest version
-```
-
-## Configuration Management
-
-The container is designed to work with your local logsh configuration files.
+| Flag | Description |
+|------|-------------|
+| `-v` / `-vvvv` | Increase verbosity (warn → trace) |
+| `--no-color` | Disable colored output |
+| `--context <name>` | Use a specific named context |
+| `--config-path <path>` | Override config file location |
+| `--quiet` | Suppress non-essential output |
 
 ### Environment Variables
 
-- `LOGSH_CONFIG_PATH` - Path to the configuration file inside the container (default: `/config/logsh-config.json`)
+| Variable | Description |
+|----------|-------------|
+| `LOGSH_CONFIG_PATH` | Override config file path |
+| `LOGSH_PAT_TOKEN` | Personal Access Token for `context add pat` |
+| `LOGSH_UPDATE_REPOSITORY` | Custom GitHub repo for self-update (format: `owner/repo`) |
+| `NO_COLOR` | Disable color output ([no-color.org](https://no-color.org)) |
 
-### Mounting Your Local Configuration
+### Exit Codes
 
-#### Option 1: Mount entire config directory
+| Code | Meaning |
+|------|---------|
+| 0 | Success |
+| 1 | General error |
+| 2 | Authentication failure |
+| 3 | No connection configured |
+
+## Container Usage
+
+### With Configuration
+
 ```bash
-# Mount your local ~/.logsh directory to /config in the container
-podman run --rm \
+# Mount config directory
+docker run --rm \
   -v ~/.logsh:/config:Z \
-  logsh:latest query -q "SELECT * FROM logs LIMIT 10"
-```
+  ghcr.io/logship-io/logsh:latest query -q 'MyTable | take 10'
 
-#### Option 2: Mount specific config file
-```bash
-# Mount just the config file
-podman run --rm \
+# Mount specific config file
+docker run --rm \
   -v ~/.logsh/logsh-config.json:/config/logsh-config.json:Z \
-  logsh:latest whoami
+  ghcr.io/logship-io/logsh:latest whoami
 ```
 
-### Using with Docker Compose
-
-Create a `docker-compose.yml`:
+### Docker Compose
 
 ```yaml
-version: '3.8'
 services:
   logsh:
-    image: logsh:latest
+    image: ghcr.io/logship-io/logsh:latest
     volumes:
       - ~/.logsh:/config:ro
-    environment:
-      - LOGSH_CONFIG_PATH=/config/logsh-config.json
-    command: ["query", "-q", "SELECT * FROM logs LIMIT 5"]
-```
-
-Run with:
-```bash
-docker-compose run --rm logsh
-```
-
-## Common Usage Patterns
-
-### Interactive Query
-```bash
-podman run --rm -it \
-  -v ~/.logsh:/config:Z \
-  logsh:latest query -q "SELECT timestamp, message FROM logs WHERE level='ERROR'"
-```
-
-### Upload Logs
-```bash
-podman run --rm \
-  -v ~/.logsh:/config:Z \
-  -v /path/to/logs:/logs:Z \
-  logsh:latest upload /logs/app.log
-```
-
-### Check Connection Status
-```bash
-podman run --rm \
-  -v ~/.logsh:/config:Z \
-  logsh:latest whoami
-```
-
-### Account Management
-```bash
-# List accounts
-podman run --rm \
-  -v ~/.logsh:/config:Z \
-  logsh:latest account ls
-
-# Set default account
-podman run --rm \
-  -v ~/.logsh:/config:Z \
-  logsh:latest account default 00000000-0000-0000-0000-000000000000
-```
-
-## Troubleshooting
-
-### Configuration File Not Found
-Ensure your local configuration file exists and is properly mounted:
-```bash
-# Check if config exists locally
-ls -la ~/.logsh/logsh-config.json
-
-# Check if mounted correctly in container
-podman run --rm \
-  -v ~/.logsh:/config:Z \
-  logsh:latest ls -la /config/
-```
-
-### Permission Issues
-If you encounter permission issues, ensure the mounted volume has correct SELinux context (`:Z` flag) or permissions.
-
-### Network Connectivity
-The container may need network access to connect:
-```bash
-# Ensure network access
-podman run --rm --network=host \
-  -v ~/.logsh:/config:Z \
-  logsh:latest whoami
+    command: ["query", "-q", "MyTable | take 5", "-o", "json"]
 ```
 
 ## Development
 
-### Building and Testing
-
 ```bash
-# Build the project
-cd logsh && cargo build
-
-# Run with development build
-cd logsh && cargo run -- --help
+cd logsh && cargo build          # Debug build
+cd logsh && cargo build --release  # Release build
+cd logsh && cargo test           # Run tests
+cd logsh && cargo clippy -- -D warnings  # Lint
 ```
 
-**Release Tags:**
-- **`latest`**: Latest stable release version (tagged releases)
-- **`latest-pre`**: Latest development build (from main/master branch)
+### Tags
+
+- **`latest`**: Latest stable release
+- **`latest-pre`**: Latest development build (main/master)
 

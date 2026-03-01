@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
     connect::Connection,
-    error::{CommonError, UploadError, ClientError}, logship_client::LogshClientHandler,
+    error::{CommonError, UploadError},
 };
 use reqwest::blocking::Body;
 use serde_json::Value;
@@ -37,7 +37,7 @@ impl<R: Read> ProgressReader<R> {
 
         let percent = ((self.sent * 100) / self.total).min(100);
         if percent != self.last_percent {
-            print!("\rUploading: {:>3}%", percent);
+            print!("\rUploading: {percent:>3}%");
             let _ = std::io::stdout().flush();
             self.last_percent = percent;
         }
@@ -64,14 +64,18 @@ fn map_upload_error(response: reqwest::blocking::Response) -> UploadError {
         .and_then(|body| {
             serde_json::from_str::<Value>(&body)
                 .ok()
-                .and_then(|v| v.get("message").and_then(|m| m.as_str().map(|s| s.to_string())))
-                .or_else(|| Some(body))
+                .and_then(|v| {
+                    v.get("message")
+                        .and_then(|m| m.as_str().map(|s| s.to_string()))
+                })
+                .or(Some(body))
         })
         .unwrap_or_else(|| "Unknown error".to_string());
 
     UploadError::UploadFailureStatus(status.as_u16() as i32, message)
 }
 
+/// Uploads a file to the logship inflow endpoint for the given schema.
 pub fn execute<'a>(
     schema_str: &'a str,
     path_str: &'a str,
@@ -80,7 +84,7 @@ pub fn execute<'a>(
     pretty_progress: bool,
 ) -> Result<(), UploadError> {
     if path_str.trim().is_empty() {
-        log::debug!("Uploading file: {:?}", path_str);
+        log::debug!("Uploading file: {path_str:?}");
         return Err(UploadError::Common(CommonError::EmptyArgument(
             "path".to_string(),
         )));
@@ -93,16 +97,16 @@ pub fn execute<'a>(
         )));
     }
 
-    let ext = path.extension()
+    let ext = path
+        .extension()
         .ok_or(UploadError::UnsupportedFileExtension("".to_string()))
         .map(|e| e.to_string_lossy())?;
 
-    let sub = &connection.default_account()
-        .ok_or(UploadError::Config(crate::error::ConfigError::NoDefaultConnection))?;
+    let sub = &connection.default_account().ok_or(UploadError::Config(
+        crate::error::ConfigError::NoDefaultConnection,
+    ))?;
 
-    let client = crate::connect::client_builder()
-        .timeout(timeout)
-        .build()?;
+    let client = crate::connect::client_builder().timeout(timeout).build()?;
     let req = client.post(format!(
         "{}/inflow/{}/{}/{}",
         &connection.server.trim_end_matches("/"),
@@ -122,7 +126,14 @@ pub fn execute<'a>(
     let response = connection
         .authenticate_request(req)
         .body(body)
-        .header("content-type", "application/occoptet-stream")
+        .header(
+            "content-type",
+            match ext.as_ref() {
+                "csv" => "text/csv",
+                "tsv" => "text/tab-separated-values",
+                _ => "application/octet-stream",
+            },
+        )
         .send()?;
 
     if !response.status().is_success() {
@@ -132,50 +143,6 @@ pub fn execute<'a>(
     if pretty_progress {
         println!();
     }
-
-    Ok(())
-}
-
-pub fn execute_upload<'a>(
-    client: &LogshClientHandler,
-    schema_str: &'a str,
-    path_str: &'a str,
-) -> Result<(), UploadError> {
-    if path_str.trim().is_empty() {
-        log::debug!("Uploading file: {:?}", path_str);
-        return Err(UploadError::Common(CommonError::EmptyArgument(
-            "path".to_string(),
-        )));
-    }
-
-    let path = Path::new(path_str);
-    if !path.exists() {
-        return Err(UploadError::Common(CommonError::FileNotFound(
-            path_str.to_string(),
-        )));
-    }
-
-    let ext = path.extension()
-        .ok_or(UploadError::UnsupportedFileExtension("".to_string()))
-        .map(|e| e.to_string_lossy())?;
-
-    let connection = client.get_connection()?;
-    if connection.default_account.is_none() {
-        return Err(UploadError::Config(crate::error::ConfigError::NoDefaultAccount));
-    }
-
-    let query_url = format!(
-        "inflow/{}/{}/{}",
-        connection.default_account.unwrap(),
-        schema_str,
-        ext,
-    );
-
-    client.execute_func(&|client| -> Result<(), ClientError> {
-        let file = File::open(path).map_err(|err| { ClientError::Common(CommonError::IOError(err))})?;
-        let _result: () = client.put(&query_url, file)?;
-        Ok(())
-    })?;
 
     Ok(())
 }

@@ -1,0 +1,17 @@
+[package]
+name = "logsht"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+logsh-core = { path = "../logsh-core" }
+ratatui = "0.30.0"
+crossterm = "0.29.0"
+tui-textarea = { package = "ratatui-textarea", version = "0.8", features = ["crossterm"] }
+anyhow = "1.0.102"
+log = "0.4.29"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", features = ["raw_value"] }
+uuid = { version = "1", features = ["serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+home = "0.5"
