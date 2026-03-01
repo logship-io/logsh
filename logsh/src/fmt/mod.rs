@@ -23,6 +23,7 @@ pub struct Connection {
     pub accounts: Vec<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DataFrame {

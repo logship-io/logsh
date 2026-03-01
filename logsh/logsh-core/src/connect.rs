@@ -342,18 +342,18 @@ impl Connection {
             Ok(response.text()?)
         } else if response.status() == StatusCode::BAD_REQUEST {
             let error_text = response.text()?;
-            return Err(QueryError::Common(crate::error::CommonError::ApiError(
+            Err(QueryError::Common(crate::error::CommonError::ApiError(
                 error_text.as_str().try_into()?,
-            )));
+            )))
         } else {
             response.error_for_status()?;
-            return Err(QueryError::Common(crate::error::CommonError::ApiError(
+            Err(QueryError::Common(crate::error::CommonError::ApiError(
                 ApiErrorModel {
                     message: "Unknown error".to_string(),
                     stack_trace: None,
                     errors: vec![],
                 },
-            )));
+            )))
         }
     }
 }

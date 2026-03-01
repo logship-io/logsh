@@ -2,12 +2,11 @@ use std::str::FromStr;
 
 use anyhow::{anyhow, Error};
 use clap::{
-    arg,
     builder::{
         styling::{AnsiColor, Effects},
         Styles,
     },
-    command, Parser, Subcommand, ValueEnum,
+    Parser, Subcommand, ValueEnum,
 };
 use colored::Colorize;
 

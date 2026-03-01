@@ -5,7 +5,7 @@ use std::{
 };
 
 use anyhow::{anyhow, Error};
-use clap::arg;
+
 use colored::Colorize;
 use logsh_core::{
     config,
