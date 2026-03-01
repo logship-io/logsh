@@ -136,8 +136,7 @@ jobs:
           foreach ($bin in @("logsh", "logsht")) {
             $binaryPath = "$releaseDir/$bin$ext"
             if (Test-Path $binaryPath) {
-              $zipPath = "artifacts/$bin-$target.zip"
-              Compress-Archive -Path $binaryPath -DestinationPath $zipPath
+              Copy-Item $binaryPath "artifacts/$bin-$target$ext"
             }
           }
 

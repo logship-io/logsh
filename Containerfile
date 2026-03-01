@@ -22,12 +22,20 @@ WORKDIR /usr/src/app/logsh
 
 # Build for target architecture
 # xx-clang handles cross-compilation transparently
-RUN export RUST_TARGET="$(xx-info rust-target)" && \
+RUN case "$(xx-info arch)" in \
+        amd64)  RUST_TARGET="x86_64-unknown-linux-musl" ;; \
+        arm64)  RUST_TARGET="aarch64-unknown-linux-musl" ;; \
+        armv7)  RUST_TARGET="armv7-unknown-linux-musleabihf" ;; \
+        arm)    RUST_TARGET="arm-unknown-linux-musleabi" ;; \
+        *)      echo "Unsupported arch: $(xx-info arch)" && exit 1 ;; \
+    esac && \
+    export RUST_TARGET && \
     export CARGO_TARGET_DIR="target" && \
     export CC="xx-clang" && \
     export CXX="xx-clang++" && \
-    export AR="llvm-ar" && \
-    export RANLIB="llvm-ranlib" && \
+    export AR="ar" && \
+    export RANLIB="ranlib" && \
+    export CFLAGS="--sysroot=$(xx-info sysroot)" && \
     export RUSTFLAGS="-C target-feature=+crt-static -C linker=xx-clang" && \
     rustup target add "$RUST_TARGET" && \
     cargo fetch --target "$RUST_TARGET" && \
