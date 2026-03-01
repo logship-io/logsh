@@ -1,6 +1,6 @@
 # Multi-stage multi-arch build for logsh CLI tool
 # xx provides cross-compilation helpers for Docker multi-platform builds
-FROM --platform=$BUILDPLATFORM tonistiigi/xx:1.6.1 AS xx
+FROM --platform=$BUILDPLATFORM tonistiigi/xx:1.9.0 AS xx
 
 FROM --platform=$BUILDPLATFORM rust:1.93.1-alpine AS builder
 COPY --from=xx / /
