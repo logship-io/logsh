@@ -1,20 +1,17 @@
 # Multi-stage multi-arch build for logsh CLI tool
+# xx provides cross-compilation helpers for Docker multi-platform builds
+FROM --platform=$BUILDPLATFORM tonistiigi/xx:1.6.1 AS xx
+
 FROM --platform=$BUILDPLATFORM rust:1.93.1-alpine AS builder
+COPY --from=xx / /
 
-ARG TARGETARCH
+ARG TARGETPLATFORM
 
-# Install necessary build tools for musl target
-RUN apk add --no-cache \
-    musl-dev \
-    openssl-dev \
-    openssl-libs-static \
-    pkgconfig
+# Install host build tools (clang/lld for cross-compilation, cmake for aws-lc-sys)
+RUN apk add --no-cache clang lld cmake make pkgconfig
 
-# Install cross-compilation toolchains when needed
-RUN case "$TARGETARCH" in \
-      arm64) apk add --no-cache gcc-aarch64-none-elf ;; \
-      arm)   apk add --no-cache gcc-arm-none-eabi ;; \
-    esac || true
+# Install target architecture musl-dev and gcc
+RUN xx-apk add --no-cache musl-dev gcc
 
 # Set working directory
 WORKDIR /usr/src/app
@@ -23,19 +20,19 @@ WORKDIR /usr/src/app
 COPY . .
 WORKDIR /usr/src/app/logsh
 
-# Map Docker platform to Rust target and build
-ENV RUSTFLAGS="-C target-feature=+crt-static" \
-    OPENSSL_STATIC=1
-
-RUN case "$TARGETARCH" in \
-      amd64) RUST_TARGET="x86_64-unknown-linux-musl" ;; \
-      arm64) RUST_TARGET="aarch64-unknown-linux-musl" ;; \
-      arm)   RUST_TARGET="armv7-unknown-linux-musleabihf" ;; \
-      *)     echo "Unsupported arch: $TARGETARCH" && exit 1 ;; \
-    esac && \
+# Build for target architecture
+# xx-clang handles cross-compilation transparently
+RUN export RUST_TARGET="$(xx-info rust-target)" && \
+    export CARGO_TARGET_DIR="target" && \
+    export CC="xx-clang" && \
+    export CXX="xx-clang++" && \
+    export AR="llvm-ar" && \
+    export RANLIB="llvm-ranlib" && \
+    export RUSTFLAGS="-C target-feature=+crt-static -C linker=xx-clang" && \
     rustup target add "$RUST_TARGET" && \
     cargo fetch --target "$RUST_TARGET" && \
     cargo build --release --no-default-features --target "$RUST_TARGET" && \
+    xx-verify "target/$RUST_TARGET/release/logsh" && \
     cp "target/$RUST_TARGET/release/logsh" /logsh-binary
 
 # Runtime stage - scratch image
