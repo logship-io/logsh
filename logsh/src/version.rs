@@ -256,7 +256,6 @@ fn run_self_update<W: Write>(write: &mut W, command: &VersionCommand) -> Result<
         let binary_name = if cfg!(windows) { "logsh.exe" } else { "logsh" };
         let binary_file = tmp_dir.path().join(binary_name);
 
-
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;

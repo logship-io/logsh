@@ -279,7 +279,6 @@ fn switch_context(name: &str) -> BackendResponse {
         Err(e) => return BackendResponse::ContextError(format!("Config error: {e}")),
     };
 
-
     if !cfg.contexts.contains_key(name) {
         return BackendResponse::ContextError(format!("Context \"{name}\" not found."));
     }
@@ -341,7 +340,10 @@ fn save_query(name: &str, query: &str) -> BackendResponse {
     #[derive(serde::Deserialize)]
     struct SaveQueryResponse {}
 
-    match auth.client.post_json::<_, SaveQueryResponse>(&url, &SaveQueryRequest { name, query }) {
+    match auth
+        .client
+        .post_json::<_, SaveQueryResponse>(&url, &SaveQueryRequest { name, query })
+    {
         Ok(_) => BackendResponse::QuerySaved,
         Err(e) => BackendResponse::QuerySaveError(format!("{e}")),
     }

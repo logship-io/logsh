@@ -43,7 +43,11 @@ impl LogshClient {
         }
     }
 
-    fn request(&self, method: &str, path: &str) -> (reqwest::blocking::Client, reqwest::blocking::RequestBuilder) {
+    fn request(
+        &self,
+        method: &str,
+        path: &str,
+    ) -> (reqwest::blocking::Client, reqwest::blocking::RequestBuilder) {
         let path_clean = get_clean_path(path);
         let url = format!("{}/{}", self.server, path_clean);
         log::debug!("[{method}] {url}");

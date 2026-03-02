@@ -119,10 +119,8 @@ pub fn execute_query<W: Write>(
             serde_json::to_writer_pretty(write, &result)?;
             Ok(())
         }
-        OutputMode::Csv => {
-            logsh_core::csv::write_csv(&result, write)
-                .map_err(|e| anyhow!("Failed to convert to CSV: {e}"))
-        }
+        OutputMode::Csv => logsh_core::csv::write_csv(&result, write)
+            .map_err(|e| anyhow!("Failed to convert to CSV: {e}")),
     }?;
 
     let render_duration = render_start.elapsed();
