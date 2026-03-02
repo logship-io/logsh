@@ -102,7 +102,7 @@ jobs:
           fi
           echo "Injecting version: $VERSION"
           for toml in ./logsh/Cargo.toml ./logsh/logsh-core/Cargo.toml ./logsh/logsht/Cargo.toml; do
-            sed -i "s/^version = \".*\"/version = \"$VERSION\"/" "$toml"
+            sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" "$toml" && rm -f "$toml.bak"
           done
 
       - uses: dtolnay/rust-toolchain@stable
