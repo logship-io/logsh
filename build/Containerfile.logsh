@@ -11,6 +11,6 @@ RUN case "$TARGETARCH" in \
 FROM scratch
 COPY --from=setup /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=setup /logsh /logsh
-ENV LOGSH_CONFIG_PATH=/config/logsh-config.json
+ENV LOGSH_CONFIG_PATH=/config/config.json
 ENTRYPOINT ["/logsh"]
 CMD ["--help"]

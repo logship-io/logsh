@@ -111,7 +111,7 @@ fn styles() -> Styles {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Manage contexts (server connections), like kubectl contexts.
+    /// Manage contexts (server connections).
     #[clap(subcommand)]
     Context(crate::config::ContextCommand),
 
@@ -186,17 +186,14 @@ fn main() {
         .filter_level(log_level)
         .init();
 
-    // Apply global config path override
     if let Some(ref path) = cli.config_path {
         std::env::set_var("LOGSH_CONFIG_PATH", path);
     }
 
-    // Apply global context override
     if let Some(ref ctx) = cli.context {
         logsh_core::config::set_context_override(ctx.clone());
     }
 
-    // Apply global account override
     if let Some(ref account) = cli.account {
         logsh_core::config::set_account_override(account.clone());
     }
@@ -280,7 +277,6 @@ fn run(cli: Args) -> Result<i32, Error> {
             Ok(exit_codes::SUCCESS)
         }
         None => {
-            log::debug!("No arguments provided. Output status.");
             let cfg = logsh_core::config::load()?;
             let conn = cfg.get_current_context();
             match conn {

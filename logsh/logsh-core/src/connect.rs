@@ -13,7 +13,6 @@ use crate::config;
 use crate::error::{AuthError, ConfigError, ConnectError, OAuthError, QueryError};
 use crate::query::QueryRequest;
 
-/// Represents an authenticated connection to a logship server.
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Connection {
     pub server: String,
@@ -63,7 +62,6 @@ impl fmt::Display for Connection {
     }
 }
 
-/// Response model from the `/whoami` endpoint.
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UserModel {
@@ -180,9 +178,7 @@ impl Connection {
         Ok(json)
     }
 
-    /// Queries the server's `/whoami` endpoint and returns the authenticated user.
     pub fn who_am_i(&self) -> Result<UserModel, ConnectError> {
-        log::debug!("Executing who am I query");
         let client = client_builder().build()?;
         let response: UserModel = self
             .authenticate_request(
@@ -194,9 +190,7 @@ impl Connection {
         Ok(response)
     }
 
-    /// Fetches the list of accounts accessible by the given user.
     pub fn accounts(&self, user: uuid::Uuid) -> Result<Vec<AccountsModel>, ConnectError> {
-        log::debug!("Executing accounts query");
         let client = client_builder().build()?;
         let response: Vec<AccountsModel> = self
             .authenticate_request(client.get(format!(
@@ -210,7 +204,26 @@ impl Connection {
         Ok(response)
     }
 
-    /// Refreshes the connection's authentication, re-authenticating if necessary.
+    fn post_auth_setup(&mut self) -> Result<(), ConnectError> {
+        let user = self.who_am_i()?;
+        let mut subs = self.accounts(user.user_id)?;
+        subs.sort_by(|a, b| a.account_name.cmp(&b.account_name));
+        self.user_id = user.user_id;
+        self.username = user.user_name;
+        self.known_accounts = subs.iter().map(|s| s.account_name.clone()).collect();
+
+        if self.default_account.is_none() {
+            self.default_account = subs.first().map(|s| s.account_id);
+        }
+        self.default_account_name = self.default_account.and_then(|id| {
+            subs.iter()
+                .find(|s| s.account_id == id)
+                .map(|s| s.account_name.clone())
+        });
+
+        Ok(())
+    }
+
     pub fn refresh_auth<F>(&mut self, auth: Option<AuthRequest<F>>) -> Result<(), ConnectError>
     where
         F: FnOnce() -> Result<String, ConnectError>,
@@ -249,7 +262,6 @@ impl Connection {
         }
     }
 
-    /// Sends a query to the parse endpoint and returns the raw JSON response.
     pub fn query_parse(&self, query: &str) -> Result<String, QueryError> {
         if query.trim().is_empty() {
             return Err(QueryError::NoInput);
@@ -301,7 +313,6 @@ impl Connection {
         }
     }
 
-    /// Sends a raw query string to the server and returns the response body as text.
     pub fn query_raw(
         &self,
         query: &str,
@@ -398,44 +409,14 @@ where
         let conn_entry = cfg.contexts.entry(name.clone());
         let c = if let Some(c) = connection.as_mut() {
             c.refresh_auth(auth)?;
-            let user = c.who_am_i()?;
-            let mut subs = c.accounts(user.user_id)?;
-            subs.sort_by(|a, b| a.account_name.cmp(&b.account_name));
-            c.user_id = user.user_id;
-            c.username = user.user_name;
-            c.known_accounts = subs.iter().map(|s| s.account_name.clone()).collect();
-
-            if c.default_account.is_none() {
-                c.default_account = subs.first().map(|s| s.account_id);
-            }
-            c.default_account_name = c.default_account.and_then(|id| {
-                subs.iter()
-                    .find(|s| s.account_id == id)
-                    .map(|s| s.account_name.clone())
-            });
-
+            c.post_auth_setup()?;
             Ok(c.clone())
         } else {
             match conn_entry {
                 std::collections::hash_map::Entry::Occupied(mut o) => {
                     let c = o.get_mut();
                     c.refresh_auth(auth)?;
-                    let user = c.who_am_i()?;
-                    let mut subs = c.accounts(user.user_id)?;
-                    subs.sort_by(|a, b| a.account_name.cmp(&b.account_name));
-                    c.user_id = user.user_id;
-                    c.username = user.user_name;
-                    c.known_accounts = subs.iter().map(|s| s.account_name.clone()).collect();
-
-                    if c.default_account.is_none() {
-                        c.default_account = subs.first().map(|s| s.account_id);
-                    }
-                    c.default_account_name = c.default_account.and_then(|id| {
-                        subs.iter()
-                            .find(|s| s.account_id == id)
-                            .map(|s| s.account_name.clone())
-                    });
-
+                    c.post_auth_setup()?;
                     Ok(c.clone())
                 }
                 std::collections::hash_map::Entry::Vacant(_) => {

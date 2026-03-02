@@ -1,5 +1,4 @@
 use ratatui::{
-    layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
@@ -41,7 +40,7 @@ const KEYBINDINGS: &[(&str, &str)] = &[
 ];
 
 pub fn draw(f: &mut Frame) {
-    let area = centered_rect(60, 70, f.area());
+    let area = super::centered_rect(60, 70, f.area());
     f.render_widget(Clear, area);
 
     let block = Block::default()
@@ -98,20 +97,4 @@ pub fn draw(f: &mut Frame) {
 
     let p = Paragraph::new(lines).block(block);
     f.render_widget(p, area);
-}
-
-fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
-    let vertical = Layout::vertical([
-        Constraint::Percentage((100 - percent_y) / 2),
-        Constraint::Percentage(percent_y),
-        Constraint::Percentage((100 - percent_y) / 2),
-    ])
-    .split(area);
-
-    Layout::horizontal([
-        Constraint::Percentage((100 - percent_x) / 2),
-        Constraint::Percentage(percent_x),
-        Constraint::Percentage((100 - percent_x) / 2),
-    ])
-    .split(vertical[1])[1]
 }

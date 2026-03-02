@@ -5,6 +5,43 @@ use std::collections::HashMap;
 
 use crate::app::{CellValue, QueryResults, SavedQuery};
 
+struct ContextInfo {
+    cfg: logsh_core::config::Configuration,
+    name: String,
+    connection: logsh_core::connect::Connection,
+}
+
+fn load_context() -> Result<ContextInfo, String> {
+    let cfg = logsh_core::config::load().map_err(|e| format!("Config error: {e}"))?;
+    let ctx = cfg
+        .get_current_context()
+        .ok_or_else(|| "No context configured.".to_string())?;
+    Ok(ContextInfo {
+        name: ctx.name.clone(),
+        connection: ctx.connection,
+        cfg,
+    })
+}
+
+struct AuthenticatedContext {
+    client: logsh_core::logship_client::LogshClient,
+    account_id: uuid::Uuid,
+}
+
+fn authenticated_client() -> Result<AuthenticatedContext, String> {
+    let ctx = load_context()?;
+    let account_id = ctx
+        .connection
+        .effective_account()
+        .ok_or_else(|| "No account selected.".to_string())?;
+    let token = ctx
+        .connection
+        .get_token()
+        .ok_or_else(|| "Not authenticated.".to_string())?;
+    let client = logsh_core::logship_client::LogshClient::new(&ctx.connection.server, token);
+    Ok(AuthenticatedContext { client, account_id })
+}
+
 /// Requests sent from the UI thread to the backend thread.
 #[derive(Debug)]
 pub enum BackendRequest {
@@ -105,19 +142,14 @@ pub fn spawn_backend(
 }
 
 fn execute_query(query: &str) -> BackendResponse {
-    let mut cfg = match logsh_core::config::load() {
+    let ctx = match load_context() {
         Ok(c) => c,
-        Err(e) => return BackendResponse::QueryError(format!("Config error: {e}")),
+        Err(e) => return BackendResponse::QueryError(e),
     };
 
-    let ctx = match cfg.get_current_context() {
-        Some(c) => c,
-        None => return BackendResponse::QueryError("No context configured.".to_string()),
-    };
-
+    let mut cfg = ctx.cfg;
     let mut conn = ctx.connection;
 
-    // If no default account is set, fetch accounts and pick the first one
     if conn.default_account().is_none() {
         match conn.accounts(conn.user_id) {
             Ok(accounts) => {
@@ -125,7 +157,6 @@ fn execute_query(query: &str) -> BackendResponse {
                     conn.default_account = Some(first.account_id);
                     conn.default_account_name = Some(first.account_name.clone());
                     conn.known_accounts = accounts.iter().map(|a| a.account_name.clone()).collect();
-                    // Persist so we don't have to fetch every time
                     cfg.contexts.insert(ctx.name.clone(), conn.clone());
                     let _ = logsh_core::config::save(cfg);
                 }
@@ -146,14 +177,9 @@ fn execute_query(query: &str) -> BackendResponse {
 }
 
 fn parse_query(query: &str) -> BackendResponse {
-    let cfg = match logsh_core::config::load() {
+    let ctx = match load_context() {
         Ok(c) => c,
-        Err(e) => return BackendResponse::ParseError(format!("Config error: {e}")),
-    };
-
-    let ctx = match cfg.get_current_context() {
-        Some(c) => c,
-        None => return BackendResponse::ParseError("No context configured.".to_string()),
+        Err(e) => return BackendResponse::ParseError(e),
     };
 
     match ctx.connection.query_parse(query) {
@@ -166,14 +192,9 @@ fn parse_query(query: &str) -> BackendResponse {
 }
 
 fn load_accounts() -> BackendResponse {
-    let cfg = match logsh_core::config::load() {
+    let ctx = match load_context() {
         Ok(c) => c,
-        Err(e) => return BackendResponse::AccountsError(format!("Config error: {e}")),
-    };
-
-    let ctx = match cfg.get_current_context() {
-        Some(c) => c,
-        None => return BackendResponse::AccountsError("No context configured.".to_string()),
+        Err(e) => return BackendResponse::AccountsError(e),
     };
 
     match ctx.connection.accounts(ctx.connection.user_id) {
@@ -186,16 +207,12 @@ fn load_accounts() -> BackendResponse {
 }
 
 fn select_account(account_id: uuid::Uuid, account_name: &str) -> BackendResponse {
-    let mut cfg = match logsh_core::config::load() {
+    let ctx = match load_context() {
         Ok(c) => c,
-        Err(e) => return BackendResponse::ContextError(format!("Config error: {e}")),
+        Err(e) => return BackendResponse::ContextError(e),
     };
 
-    let ctx = match cfg.get_current_context() {
-        Some(c) => c,
-        None => return BackendResponse::ContextError("No context configured.".to_string()),
-    };
-
+    let mut cfg = ctx.cfg;
     let mut conn = ctx.connection;
     conn.default_account = Some(account_id);
     conn.default_account_name = Some(account_name.to_string());
@@ -208,10 +225,8 @@ fn select_account(account_id: uuid::Uuid, account_name: &str) -> BackendResponse
 }
 
 fn load_schemas() -> BackendResponse {
-    // Use the Logship metadata query to discover tables and columns
     match execute_query("$metadata.schema.tables.fields") {
         BackendResponse::QueryResult(results) => {
-            // Response has columns: TableName, ColumnName, ColumnType
             let table_col = results
                 .columns
                 .iter()
@@ -276,28 +291,12 @@ fn switch_context(name: &str) -> BackendResponse {
 }
 
 fn load_saved_queries() -> BackendResponse {
-    let cfg = match logsh_core::config::load() {
-        Ok(c) => c,
-        Err(e) => return BackendResponse::SavedQueriesError(format!("Config error: {e}")),
+    let auth = match authenticated_client() {
+        Ok(a) => a,
+        Err(e) => return BackendResponse::SavedQueriesError(e),
     };
 
-    let ctx = match cfg.get_current_context() {
-        Some(c) => c,
-        None => return BackendResponse::SavedQueriesError("No context configured.".to_string()),
-    };
-
-    let account_id = match ctx.connection.effective_account() {
-        Some(id) => id,
-        None => return BackendResponse::SavedQueriesError("No account selected.".to_string()),
-    };
-
-    let token = match ctx.connection.get_token() {
-        Some(t) => t,
-        None => return BackendResponse::SavedQueriesError("Not authenticated.".to_string()),
-    };
-
-    let client = logsh_core::logship_client::LogshClient::new(&ctx.connection.server, token);
-    let url = format!("search/{account_id}/saved-queries");
+    let url = format!("search/{}/saved-queries", auth.account_id);
 
     #[derive(serde::Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -307,7 +306,7 @@ fn load_saved_queries() -> BackendResponse {
         query: String,
     }
 
-    match client.get_json::<Vec<SavedQueryResponse>>(&url) {
+    match auth.client.get_json::<Vec<SavedQueryResponse>>(&url) {
         Ok(queries) => {
             let saved: Vec<SavedQuery> = queries
                 .into_iter()
@@ -324,28 +323,12 @@ fn load_saved_queries() -> BackendResponse {
 }
 
 fn save_query(name: &str, query: &str) -> BackendResponse {
-    let cfg = match logsh_core::config::load() {
-        Ok(c) => c,
-        Err(e) => return BackendResponse::QuerySaveError(format!("Config error: {e}")),
+    let auth = match authenticated_client() {
+        Ok(a) => a,
+        Err(e) => return BackendResponse::QuerySaveError(e),
     };
 
-    let ctx = match cfg.get_current_context() {
-        Some(c) => c,
-        None => return BackendResponse::QuerySaveError("No context configured.".to_string()),
-    };
-
-    let account_id = match ctx.connection.effective_account() {
-        Some(id) => id,
-        None => return BackendResponse::QuerySaveError("No account selected.".to_string()),
-    };
-
-    let token = match ctx.connection.get_token() {
-        Some(t) => t,
-        None => return BackendResponse::QuerySaveError("Not authenticated.".to_string()),
-    };
-
-    let client = logsh_core::logship_client::LogshClient::new(&ctx.connection.server, token);
-    let url = format!("search/{account_id}/saved-queries");
+    let url = format!("search/{}/saved-queries", auth.account_id);
 
     #[derive(serde::Serialize)]
     #[serde(rename_all = "camelCase")]
@@ -357,37 +340,24 @@ fn save_query(name: &str, query: &str) -> BackendResponse {
     #[derive(serde::Deserialize)]
     struct SaveQueryResponse {}
 
-    match client.post_json::<_, SaveQueryResponse>(&url, &SaveQueryRequest { name, query }) {
+    match auth
+        .client
+        .post_json::<_, SaveQueryResponse>(&url, &SaveQueryRequest { name, query })
+    {
         Ok(_) => BackendResponse::QuerySaved,
         Err(e) => BackendResponse::QuerySaveError(format!("{e}")),
     }
 }
 
 fn delete_saved_query(query_id: uuid::Uuid) -> BackendResponse {
-    let cfg = match logsh_core::config::load() {
-        Ok(c) => c,
-        Err(e) => return BackendResponse::QueryDeleteError(format!("Config error: {e}")),
+    let auth = match authenticated_client() {
+        Ok(a) => a,
+        Err(e) => return BackendResponse::QueryDeleteError(e),
     };
 
-    let ctx = match cfg.get_current_context() {
-        Some(c) => c,
-        None => return BackendResponse::QueryDeleteError("No context configured.".to_string()),
-    };
+    let url = format!("search/{}/saved-queries/{query_id}", auth.account_id);
 
-    let account_id = match ctx.connection.effective_account() {
-        Some(id) => id,
-        None => return BackendResponse::QueryDeleteError("No account selected.".to_string()),
-    };
-
-    let token = match ctx.connection.get_token() {
-        Some(t) => t,
-        None => return BackendResponse::QueryDeleteError("Not authenticated.".to_string()),
-    };
-
-    let client = logsh_core::logship_client::LogshClient::new(&ctx.connection.server, token);
-    let url = format!("search/{account_id}/saved-queries/{query_id}");
-
-    match client.delete(&url) {
+    match auth.client.delete(&url) {
         Ok(_) => BackendResponse::QueryDeleted,
         Err(e) => BackendResponse::QueryDeleteError(format!("{e}")),
     }
