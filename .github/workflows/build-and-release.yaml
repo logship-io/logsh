@@ -121,12 +121,12 @@ jobs:
 
       - name: Build (native)
         if: ${{ !matrix.cross }}
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --workspace --release --target ${{ matrix.target }}
         working-directory: ./logsh
 
       - name: Build (cross)
         if: matrix.cross
-        run: cross build --release --target ${{ matrix.target }}
+        run: cross build --workspace --release --target ${{ matrix.target }}
         working-directory: ./logsh
 
       - name: Prepare artifacts
@@ -156,7 +156,7 @@ jobs:
   prerelease:
     name: Create pre-release
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
-    needs: build
+    needs: [build, container]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -257,7 +257,7 @@ jobs:
   release:
     name: Create release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [build, container]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
