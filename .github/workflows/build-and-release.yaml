@@ -39,22 +39,29 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             cross: false
-          # Linux x86_64 musl (static)
+          # Linux x86_64 musl (static, for containers)
           - os: ubuntu-latest
             target: x86_64-unknown-linux-musl
             cross: true
+            container_arch: amd64
           # Linux aarch64
           - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
             cross: true
-          # Linux aarch64 musl (static)
+          # Linux aarch64 musl (static, for containers)
           - os: ubuntu-latest
             target: aarch64-unknown-linux-musl
             cross: true
+            container_arch: arm64
           # Linux ARMv7 (Raspberry Pi etc)
           - os: ubuntu-latest
             target: armv7-unknown-linux-gnueabihf
             cross: true
+          # Linux ARMv7 musl (static, for containers)
+          - os: ubuntu-latest
+            target: armv7-unknown-linux-musleabihf
+            cross: true
+            container_arch: arm
           # Linux ARM (older 32-bit ARM)
           - os: ubuntu-latest
             target: arm-unknown-linux-gnueabihf
@@ -172,18 +179,25 @@ jobs:
   container:
     name: Container (${{ matrix.image }})
     runs-on: ubuntu-latest
-    needs: quality
+    needs: build
     strategy:
       matrix:
         include:
           - image: logsh
-            file: ./Containerfile
+            file: ./build/Containerfile.logsh
             suffix: ""
           - image: logsht
-            file: ./Containerfile.logsht
+            file: ./build/Containerfile.logsht
             suffix: /logsht
     steps:
       - uses: actions/checkout@v4
+
+      - name: Download musl artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: build
+          pattern: logsh-cli-*musl*
+          merge-multiple: true
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -201,7 +215,6 @@ jobs:
 
       - name: Extract metadata
         id: meta
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}${{ matrix.suffix }}
@@ -212,30 +225,34 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
             type=raw,value=latest-pre,enable=${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' }}
 
-      - name: Inject Tag Version
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: pwsh
-        run: |
-          $Env:GIT_VERSION = $Env:GITHUB_REF -replace 'refs/.*/v', ''
-          foreach ($toml in @("./logsh/Cargo.toml", "./logsh/logsht/Cargo.toml")) {
-            (Get-Content $toml) -replace '^version\s+=\s+"([0-9\.]+)"\s*$', "version = `"$($Env:GIT_VERSION)`"" | Out-File $toml
-          }
-          echo "Version should be $($Env:GIT_VERSION)"
-          echo "----------------------------------------"
-          cat ./logsh/Cargo.toml
-          cat ./logsh/logsht/Cargo.toml
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+      - name: Build and push container image
+        uses: docker/build-push-action@v6
         with:
-          context: .
+          context: ./build
           file: ${{ matrix.file }}
           push: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v') }}
           platforms: linux/amd64,linux/arm64,linux/arm/v7
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,scope=${{ matrix.image }},mode=max
+
+      - name: Export OCI tar
+        uses: docker/build-push-action@v6
+        with:
+          context: ./build
+          file: ${{ matrix.file }}
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          outputs: type=oci,dest=${{ matrix.image }}-oci.tar
+
+      - name: Upload OCI image
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.image }}-oci
+          path: ${{ matrix.image }}-oci.tar
 
   release:
     name: Create release

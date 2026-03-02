@@ -1,0 +1,16 @@
+FROM alpine:3.23 AS setup
+ARG TARGETARCH
+RUN apk add --no-cache ca-certificates
+COPY logsh-* /tmp/
+RUN case "$TARGETARCH" in \
+      amd64) cp /tmp/logsh-x86_64-unknown-linux-musl /logsh ;; \
+      arm64) cp /tmp/logsh-aarch64-unknown-linux-musl /logsh ;; \
+      arm)   cp /tmp/logsh-armv7-unknown-linux-musleabihf /logsh ;; \
+    esac && chmod +x /logsh
+
+FROM scratch
+COPY --from=setup /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=setup /logsh /logsh
+ENV LOGSH_CONFIG_PATH=/config/logsh-config.json
+ENTRYPOINT ["/logsh"]
+CMD ["--help"]
