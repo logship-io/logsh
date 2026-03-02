@@ -185,7 +185,7 @@ docker run --rm \
 
 # Mount specific config file
 docker run --rm \
-  -v ~/.logsh/logsh-config.json:/config/logsh-config.json:Z \
+  -v ~/.logsh/config.json:/config/config.json:Z \
   ghcr.io/logship-io/logsh:latest whoami
 ```
 
