@@ -243,8 +243,7 @@ jobs:
           context: ./build
           file: ${{ matrix.file }}
           platforms: linux/amd64,linux/arm64,linux/arm/v7
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ matrix.image }}:latest
           cache-from: type=gha,scope=${{ matrix.image }}
           outputs: type=oci,dest=${{ matrix.image }}-oci.tar
 
