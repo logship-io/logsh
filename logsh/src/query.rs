@@ -78,14 +78,11 @@ pub fn execute_query<W: Write>(
     let start = Instant::now();
 
     let query = if let Some(q) = command.query {
-        log::trace!("Provided query: {}", &q);
         q
     } else if let Some(path) = command.file {
-        log::debug!("Reading query from file: {}", &path);
         std::fs::read_to_string(&path)
             .map_err(|err| anyhow!("Failed to read query file \"{path}\": {err}"))?
     } else {
-        log::debug!("Reading query from STDIN");
         let mut s = String::new();
         let _ = std::io::stdin()
             .read_to_string(&mut s)
@@ -111,29 +108,18 @@ pub fn execute_query<W: Write>(
     })?;
     let query_duration = start.elapsed();
     let render_start = Instant::now();
-    log::trace!("Finished query execution.");
-    log::trace!("Processing result.");
     match output.unwrap_or_default() {
-        OutputMode::Table => {
-            log::trace!("Outputting table");
-            render_table(result, TableStyle::thin(), false, write)
-        }
-        OutputMode::Markdown => {
-            log::trace!("Outputting markdown table");
-            render_table(result, markdown_style(), true, write)
-        }
+        OutputMode::Table => render_table(result, TableStyle::thin(), false, write),
+        OutputMode::Markdown => render_table(result, markdown_style(), true, write),
         OutputMode::Json => {
-            log::trace!("Outputting unformatted JSON");
             writeln!(write, "{r}")?;
             Ok(())
         }
         OutputMode::JsonPretty => {
-            log::trace!("Outputting pretty JSON");
             serde_json::to_writer_pretty(write, &result)?;
             Ok(())
         }
         OutputMode::Csv => {
-            log::trace!("Outputting CSV");
             logsh_core::csv::write_csv(&result, write)
                 .map_err(|e| anyhow!("Failed to convert to CSV: {e}"))
         }
@@ -269,8 +255,6 @@ fn render_table<W: Write>(
 
         is_first = false;
     }
-
-    log::trace!("Render table.");
 
     let table = table.render();
     writeln!(write, "{table}").map_err(|e| anyhow!("Failed to write table: {e}"))

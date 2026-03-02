@@ -6,7 +6,7 @@ A command-line interface for interacting with [Logship](https://logship.io). Que
 
 ```bash
 # Add a context
-logsh context add basic myctx https://my.logship.server
+logsh ctx add https://my.logship.server
 
 # Check status
 logsh whoami
@@ -51,31 +51,40 @@ logsh version --update-prerelease  # Latest dev build
 ### Contexts
 
 ```bash
-# Add with username/password
-logsh context add basic prod https://logship.example.com
+# Add with username (password will be prompted securely)
+logsh ctx add https://logship.example.com --name prod
 
 # Add with Personal Access Token (CI/automation)
-logsh context add pat ci-ctx https://logship.example.com -t $LOGSH_PAT_TOKEN
+logsh ctx add https://logship.example.com --pat --token $LOGSH_PAT_TOKEN
 
 # Add with OAuth device flow
-logsh context add oauth myctx https://logship.example.com
+logsh ctx add https://logship.example.com --sso
 
 # List contexts
-logsh context list
-logsh context list -o json   # Machine-readable
+logsh ctx ls
+logsh ctx ls -o json   # Machine-readable
 
 # Switch context
-logsh context use prod
+logsh ctx use prod
+
+# Show current context
+logsh ctx current
 
 # Re-authenticate
-logsh context login
+logsh ctx login
+
+# Remove a context
+logsh ctx rm old-ctx
 ```
 
 ### Queries
 
 ```bash
-# Interactive query
+# Inline query
 logsh query -q 'MyTable | take 10'
+
+# Read query from a file
+logsh query -f query.kql
 
 # From stdin (pipe-friendly)
 echo 'MyTable | count' | logsh query
@@ -98,12 +107,24 @@ logsh upload my_schema data.csv
 logsh upload my_schema data.tsv --progress
 ```
 
+### Schema Inspection
+
+```bash
+# List all tables
+logsh schema ls
+
+# Describe columns in a table
+logsh schema describe MyTable
+```
+
 ### Accounts
 
 ```bash
-logsh account list
-logsh account list --include-all
-logsh account default <account-id>
+logsh acc ls
+logsh acc ls --include-all
+logsh acc use <account-name>
+logsh acc current
+logsh acc delete <account-id>
 ```
 
 ### Shell Completions
@@ -126,10 +147,12 @@ logsh completions powershell >> $PROFILE
 
 | Flag | Description |
 |------|-------------|
-| `-v` / `-vvvv` | Increase verbosity (warn → trace) |
+| `-v` / `-vvvv` | Increase verbosity (error → warn → info → debug → trace) |
 | `--no-color` | Disable colored output |
 | `--context <name>` | Use a specific named context |
+| `--account <name>` | Override the account for a command (by name) |
 | `--config-path <path>` | Override config file location |
+| `-o <format>` | Output format: `table`, `json`, `json-pretty`, `csv`, `markdown` |
 | `--quiet` | Suppress non-essential output |
 
 ### Environment Variables
@@ -176,6 +199,89 @@ services:
       - ~/.logsh:/config:ro
     command: ["query", "-q", "MyTable | take 5", "-o", "json"]
 ```
+
+## logsht — Terminal UI
+
+`logsht` is an interactive terminal UI (TUI) for querying and exploring your Logship data, built with [Ratatui](https://ratatui.rs).
+
+```bash
+logsht
+```
+
+### Layout
+
+logsht has three main panes:
+
+- **Schemas** — browse and filter tables on the connected server
+- **Editor** — write and edit queries with full text editing
+- **Results** — navigate query results with keyboard controls
+
+### Keybindings
+
+| Key | Action |
+|-----|--------|
+| `Tab` / `Shift+Tab` | Cycle focus: Schemas → Editor → Results |
+| `Alt+Enter` / `Ctrl+R` | Execute query |
+| `Ctrl+K` | Open context switcher |
+| `Ctrl+S` | Open saved queries |
+| `Alt+Up` / `Alt+Down` | Navigate query history |
+| `:` | Open command bar |
+| `?` / `Ctrl+H` | Show help |
+| `Ctrl+Q` / `Ctrl+C` | Quit |
+
+#### Schemas Pane
+
+| Key | Action |
+|-----|--------|
+| `j` / `k` / `↑` / `↓` | Navigate tables |
+| `Enter` | Select table → editor |
+| `r` | Refresh schemas |
+| Type | Filter tables by name |
+
+#### Editor Pane
+
+| Key | Action |
+|-----|--------|
+| Type | Enter query text (full tui-textarea) |
+| `Esc` | Move focus to schemas |
+
+#### Results Pane
+
+| Key | Action |
+|-----|--------|
+| `j` / `k` / `↑` / `↓` | Move cursor up/down rows |
+| `h` / `l` / `←` / `→` | Navigate columns |
+| `PgUp` / `PgDn` | Scroll 20 rows |
+| `g` / `G` | Jump to top / bottom |
+
+#### Overlay Navigation
+
+| Key | Action |
+|-----|--------|
+| Type | Filter items in any overlay |
+| `Backspace` | Clear filter character |
+| `Ctrl+D` | Delete saved query (in saved overlay) |
+| `Esc` | Close overlay |
+
+### Commands
+
+Commands are entered via the command bar (`:` key):
+
+| Command | Description |
+|---------|-------------|
+| `:quit` | Exit logsht |
+| `:refresh` | Reload schemas from server |
+| `:clear` | Clear query and results |
+| `:ctx` | Open context switcher |
+| `:help` | Show keybindings |
+| `:account` | Open account picker |
+| `:saved` | Open saved queries |
+| `:save` | Save current query |
+| `:cell` | Fullscreen focused cell value |
+| `:row` | Expand focused row as key-value pairs |
+| `:copy cell` | Copy focused cell to clipboard |
+| `:copy row` | Copy focused row as JSON |
+| `:copy json` | Copy all results as JSON |
 
 ## Development
 

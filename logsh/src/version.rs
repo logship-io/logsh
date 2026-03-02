@@ -10,7 +10,6 @@ use std::io::stdin;
 use self_update::self_replace;
 
 mod build {
-    // Generated during build.
     include!(concat!(env!("OUT_DIR"), "/package_info.gen.rs"));
 }
 
@@ -125,7 +124,6 @@ pub fn version<W: Write>(
 fn run_self_update<W: Write>(write: &mut W, command: &VersionCommand) -> Result<(), Error> {
     log::info!("Checking for updates...");
 
-    // Parse custom repository or use default
     let (repo_owner, repo_name) = if let Some(repo) = &command.repo {
         let parts: Vec<&str> = repo.split('/').collect();
         if parts.len() != 2 {
@@ -146,10 +144,8 @@ fn run_self_update<W: Write>(write: &mut W, command: &VersionCommand) -> Result<
         .build()?;
 
     let latest = if command.update_prerelease {
-        // For prereleases, get the latest pre-release from "latest-pre" tag
         updater.get_release_version("latest-pre")?
     } else {
-        // For stable releases, get the latest non-prerelease
         updater.get_latest_release()?
     };
 
@@ -168,7 +164,6 @@ fn run_self_update<W: Write>(write: &mut W, command: &VersionCommand) -> Result<
         return Ok(());
     }
 
-    // Determine the target architecture for this binary
     let target = if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
         "x86_64-pc-windows-msvc"
     } else if cfg!(all(target_os = "windows", target_arch = "aarch64")) {
@@ -243,7 +238,6 @@ fn run_self_update<W: Write>(write: &mut W, command: &VersionCommand) -> Result<
             .prefix(&format!("logsh_update_{}_", latest.version))
             .tempdir_in(::std::env::current_dir()?)?;
 
-        // Download the archive file
         let archive_file = tmp_dir.path().join(&asset.name);
         let file = ::std::fs::File::create(&archive_file)?;
 
@@ -255,16 +249,14 @@ fn run_self_update<W: Write>(write: &mut W, command: &VersionCommand) -> Result<
             .show_progress(true)
             .download_to(&file)?;
 
-        // Extract the binary from zip
         self_update::Extract::from_source(&archive_file)
             .archive(self_update::ArchiveKind::Zip)
             .extract_into(tmp_dir.path())?;
 
-        // Find the extracted binary
         let binary_name = if cfg!(windows) { "logsh.exe" } else { "logsh" };
         let binary_file = tmp_dir.path().join(binary_name);
 
-        // Make executable on Unix systems
+
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;

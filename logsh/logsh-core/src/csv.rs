@@ -17,7 +17,6 @@ pub enum CsvError {
 pub fn write_csv<'a, W: std::io::Write>(query: &QueryResult<'a>, to: W) -> Result<(), CsvError> {
     let mut wtr = csv::Writer::from_writer(to);
 
-    // write headers
     wtr.write_record(&query.header)
         .map_err(CsvError::FailedWrite)?;
 

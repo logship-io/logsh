@@ -16,9 +16,7 @@ fn extract_jwt_expiry(token: &str) -> Option<DateTime<Utc>> {
         return None;
     }
 
-    // JWT payload is base64url-encoded (no padding)
     let payload = parts[1];
-    // Add padding if needed
     let padded = match payload.len() % 4 {
         2 => format!("{payload}=="),
         3 => format!("{payload}="),
@@ -58,7 +56,6 @@ fn base64_decode(input: &str) -> Option<Vec<u8>> {
     Some(output)
 }
 
-/// Authenticates with username and password, returning a JWT token.
 pub fn fetch_token<F>(
     connection: &Connection,
     client: &Client,
@@ -91,8 +88,6 @@ where
     })
 }
 
-/// Authenticate using a Personal Access Token (PAT).
-/// Sends the PAT to `/auth/pat-token` and receives a JWT in return.
 pub fn fetch_pat_token(
     connection: &Connection,
     client: &Client,

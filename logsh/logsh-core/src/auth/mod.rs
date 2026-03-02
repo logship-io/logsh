@@ -68,7 +68,6 @@ where
                 authorize_endpoint,
                 token_endpoint,
             } => {
-                log::debug!("Refreshing oauth info from server.");
                 let mut client_id = client_id;
                 let mut authorize_endpoint = authorize_endpoint;
                 let mut token_endpoint = token_endpoint;

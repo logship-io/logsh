@@ -4,7 +4,6 @@ use crate::app::{App, Focus, Overlay};
 
 /// Process a key event and update app state.
 pub fn handle_key(app: &mut App, key: KeyEvent) {
-    // Global quit
     if matches!(key.code, KeyCode::Char('c') | KeyCode::Char('q'))
         && key.modifiers.contains(KeyModifiers::CONTROL)
     {
@@ -12,13 +11,11 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
         return;
     }
 
-    // Dismiss overlays with Esc
     if key.code == KeyCode::Esc && app.overlay.is_some() {
         app.overlay = None;
         return;
     }
 
-    // Dispatch to overlay first
     if let Some(overlay) = &app.overlay.clone() {
         match overlay {
             Overlay::ContextSwitcher => handle_context_key(app, key),
@@ -41,24 +38,20 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
         return;
     }
 
-    // Command bar mode
     if app.focus == Focus::CommandBar {
         handle_command_key(app, key);
         return;
     }
 
-    // Global keybindings (when not in command bar)
     match key.code {
         KeyCode::Char(':') if app.focus != Focus::Editor => {
             app.open_command_bar();
             return;
         }
-        // Alt+Enter to execute query
         KeyCode::Enter if key.modifiers.contains(KeyModifiers::ALT) => {
             app.execute_query();
             return;
         }
-        // Ctrl+R to run query
         KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.execute_query();
             return;
@@ -67,19 +60,16 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
             app.overlay = Some(Overlay::Help);
             return;
         }
-        // Ctrl+H for help
         KeyCode::Char('h') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.overlay = Some(Overlay::Help);
             return;
         }
-        // Ctrl+K for context switcher
         KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.load_contexts();
             app.context_filter.clear();
             app.overlay = Some(Overlay::ContextSwitcher);
             return;
         }
-        // Ctrl+S for saved queries
         KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.saved_query_filter.clear();
             app.load_saved_queries();
@@ -122,18 +112,15 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
 }
 
 fn handle_editor_key(app: &mut App, key: KeyEvent) {
-    // Special editor keybindings before passing to textarea
     match key.code {
         KeyCode::Char(':') if app.editor_text().is_empty() => {
             app.open_command_bar();
             return;
         }
-        // Alt+Up for history previous
         KeyCode::Up if key.modifiers.contains(KeyModifiers::ALT) => {
             app.history_prev();
             return;
         }
-        // Alt+Down for history next
         KeyCode::Down if key.modifiers.contains(KeyModifiers::ALT) => {
             app.history_next();
             return;
@@ -141,7 +128,6 @@ fn handle_editor_key(app: &mut App, key: KeyEvent) {
         _ => {}
     }
 
-    // Pass all other keys to tui-textarea
     let input = tui_textarea::Input::from(crossterm::event::Event::Key(key));
     let changed = app.editor.input(input);
     if changed {
@@ -351,7 +337,6 @@ fn handle_saved_query_key(app: &mut App, key: KeyEvent) {
                 app.mark_editor_dirty();
             }
         }
-        // Delete with 'd'
         KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             let filtered = app.filtered_saved_queries();
             if let Some(&(_, sq)) = filtered.get(app.saved_query_selected) {

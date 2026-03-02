@@ -18,8 +18,6 @@ use crate::app::{App, Focus};
 /// └───────────────────────────────────────────────────-┘
 /// Status line / key hints at the very bottom.
 pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
-    // Bottom status bar always present (1 line)
-    // Command bar: 1 line when active
     let command_bar_height = if app.focus == Focus::CommandBar { 1 } else { 0 };
     let main_chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -43,12 +41,10 @@ pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
         draw_right_panes(f, app, main_chunks[0]);
     }
 
-    // Command bar
     if app.focus == Focus::CommandBar {
         draw_command_bar(f, app, main_chunks[1]);
     }
 
-    // Status line
     draw_status_bar(f, app, main_chunks[2]);
 }
 
@@ -66,7 +62,6 @@ fn draw_schema_nav(f: &mut Frame, app: &App, area: Rect) {
         " Schemas "
     };
 
-    // Split: schema list + optional filter bar at bottom
     let filter_height = if focused { 1 } else { 0 };
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -280,7 +275,6 @@ fn draw_results(f: &mut Frame, app: &mut App, area: Rect) {
         return;
     }
 
-    // Split: results table + 1-line position indicator at bottom
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(3), Constraint::Length(1)])
@@ -439,7 +433,6 @@ fn draw_command_bar(f: &mut Frame, app: &App, area: Rect) {
         Span::raw(&app.command_input),
     ];
 
-    // Show matching command hints
     let matches = app.matching_commands();
     if !matches.is_empty() && !app.command_input.is_empty() {
         let hint = matches
@@ -457,8 +450,7 @@ fn draw_command_bar(f: &mut Frame, app: &App, area: Rect) {
     let p = Paragraph::new(line);
     f.render_widget(p, area);
 
-    // Show cursor in command bar
-    let cx = (1 + app.command_cursor) as u16; // 1 for the ':'
+    let cx = (1 + app.command_cursor) as u16;
     f.set_cursor_position((area.x + cx, area.y));
 }
 

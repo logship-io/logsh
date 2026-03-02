@@ -36,7 +36,6 @@ fn map_api_error(response: reqwest::blocking::Response) -> error::ClientError {
 }
 
 impl LogshClient {
-    /// Creates a new client targeting the given server with the provided bearer token.
     pub fn new(server: &str, token: String) -> Self {
         Self {
             server: server.trim().to_string(),
@@ -44,52 +43,51 @@ impl LogshClient {
         }
     }
 
-    /// Sends a GET request and deserializes the JSON response.
-    pub fn get_json<TResult: for<'de> serde::Deserialize<'de>>(
-        &self,
-        path: &str,
-    ) -> Result<TResult, error::ClientError> {
+    fn request(&self, method: &str, path: &str) -> (reqwest::blocking::Client, reqwest::blocking::RequestBuilder) {
         let path_clean = get_clean_path(path);
         let url = format!("{}/{}", self.server, path_clean);
-        log::debug!("[GET] {url}");
+        log::debug!("[{method}] {url}");
         let client = reqwest::blocking::Client::new();
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             "Authorization",
             format!("Bearer {}", self.token).parse().unwrap(),
         );
-        let response = client.get(&url).headers(headers).send()?;
+        let builder = match method {
+            "GET" => client.get(&url),
+            "POST" => client.post(&url),
+            "PUT" => client.put(&url),
+            "DELETE" => client.delete(&url),
+            _ => unreachable!(),
+        };
+        (client, builder.headers(headers))
+    }
+
+    pub fn get_json<TResult: for<'de> serde::Deserialize<'de>>(
+        &self,
+        path: &str,
+    ) -> Result<TResult, error::ClientError> {
+        let (_, req) = self.request("GET", path);
+        let response = req.send()?;
         if !response.status().is_success() {
             return Err(map_api_error(response));
         }
-        let json = response.json()?;
-        Ok(json)
+        Ok(response.json()?)
     }
 
-    /// Sends a POST request with a JSON body and deserializes the JSON response.
     pub fn post_json<TRequest: serde::Serialize, TResult: for<'de> serde::Deserialize<'de>>(
         &self,
         path: &str,
         request: &TRequest,
     ) -> Result<TResult, error::ClientError> {
-        let path_clean = get_clean_path(path);
-        let url = format!("{}/{}", self.server, path_clean);
-        log::debug!("[POST] {url}");
-        let client = reqwest::blocking::Client::new();
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert(
-            "Authorization",
-            format!("Bearer {}", self.token).parse().unwrap(),
-        );
-        let response = client.post(&url).headers(headers).json(request).send()?;
+        let (_, req) = self.request("POST", path);
+        let response = req.json(request).send()?;
         if !response.status().is_success() {
             return Err(map_api_error(response));
         }
-        let json = response.json()?;
-        Ok(json)
+        Ok(response.json()?)
     }
 
-    /// Sends a PUT request with a body and deserializes the JSON response.
     pub fn put<
         TRequest: Into<reqwest::blocking::Body>,
         TResult: for<'de> serde::Deserialize<'de>,
@@ -98,35 +96,17 @@ impl LogshClient {
         path: &str,
         request: TRequest,
     ) -> Result<TResult, error::ClientError> {
-        let path_clean = get_clean_path(path);
-        let url = format!("{}/{}", self.server, path_clean);
-        log::debug!("[PUT] {url}");
-        let client = reqwest::blocking::Client::new();
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert(
-            "Authorization",
-            format!("Bearer {}", self.token).parse().unwrap(),
-        );
-        let response = client.put(&url).headers(headers).body(request).send()?;
+        let (_, req) = self.request("PUT", path);
+        let response = req.body(request).send()?;
         if !response.status().is_success() {
             return Err(map_api_error(response));
         }
-        let json = response.json()?;
-        Ok(json)
+        Ok(response.json()?)
     }
 
-    /// Sends a DELETE request to the given path.
     pub fn delete(&self, path: &str) -> Result<(), error::ClientError> {
-        let path_clean = get_clean_path(path);
-        let url = format!("{}/{}", self.server, path_clean);
-        log::debug!("[DELETE] {url}");
-        let client = reqwest::blocking::Client::new();
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert(
-            "Authorization",
-            format!("Bearer {}", self.token).parse().unwrap(),
-        );
-        let response = client.delete(&url).headers(headers).send()?;
+        let (_, req) = self.request("DELETE", path);
+        let response = req.send()?;
         if !response.status().is_success() {
             return Err(map_api_error(response));
         }

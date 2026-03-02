@@ -55,7 +55,6 @@ pub fn execute_context(command: ContextCommand, output: Option<OutputMode>) -> R
 
             cfg.current_context = name.clone();
 
-            // Optionally set the account for this context
             if let Some(account_name) = account {
                 let conn = cfg
                     .contexts
@@ -485,7 +484,6 @@ fn list<W: Write>(mut write: W, mode: Option<OutputMode>) -> Result<(), Error> {
                 }
             }
 
-            log::trace!("Rendering output table.");
             let render = table.render();
             writeln!(write, "{render}").map_err(|e| anyhow!("Failed to write output: {e}"))
         }

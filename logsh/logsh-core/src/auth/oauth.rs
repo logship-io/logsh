@@ -57,14 +57,10 @@ where
     F: FnOnce() -> Result<String, ConnectError>,
 {
     let scopes: HashSet<String> = scopes.into_iter().collect();
-    // scopes.insert("profile".to_string());
-    // scopes.insert("email".to_string());
-    // scopes.insert("offline_access".to_string());
     match &flow {
         OAuthFlow::Device => {
             log::debug!("Initializing OAuth Device Code Flow");
 
-            // Create HTTP client with security configuration
             // Use oauth2's re-exported reqwest to avoid version mismatch
             let http_client = oauth2::reqwest::blocking::Client::builder()
                 .redirect(oauth2::reqwest::redirect::Policy::none())

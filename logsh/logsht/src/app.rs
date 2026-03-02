@@ -135,24 +135,20 @@ pub struct App {
     pub overlay: Option<Overlay>,
     pub focus: Focus,
 
-    // Query editor (tui-textarea)
     pub editor: TextArea<'static>,
 
-    // Query results
     pub results: Option<QueryResults>,
-    pub results_cursor: usize, // selected row index (absolute)
-    pub results_scroll: usize, // viewport scroll offset
+    pub results_cursor: usize,
+    pub results_scroll: usize,
     pub results_col: usize,
     pub query_running: bool,
     pub error_message: Option<String>,
 
-    // Context list
     pub contexts: Vec<ContextEntry>,
     pub context_selected: usize,
     pub current_context: Option<String>,
     pub context_filter: String,
 
-    // Schema list (persistent left nav)
     pub schemas: Vec<String>,
     pub schema_columns: HashMap<String, Vec<String>>,
     pub schema_selected: usize,
@@ -160,29 +156,24 @@ pub struct App {
     pub schema_nav_visible: bool,
     pub schema_filter: String,
 
-    // Account list (for picker)
     pub accounts: Vec<AccountEntry>,
     pub account_selected: usize,
     pub current_account: Option<String>,
     pub account_filter: String,
 
-    // Saved queries
     pub saved_queries: Vec<SavedQuery>,
     pub saved_query_selected: usize,
     pub saved_queries_loading: bool,
     pub saved_query_filter: String,
     pub _save_query_name: Option<String>,
 
-    // Query history
     pub history: Vec<HistoryEntry>,
     pub history_pos: Option<usize>,
 
-    // Command bar
     pub command_input: String,
     pub command_cursor: usize,
     pub pre_command_focus: Focus,
 
-    // Parse state (debounced query parse)
     pub parse_result: Option<logsh_core::query::ParseResult>,
     pub parse_error: Option<String>,
     pub parse_dirty: bool,
@@ -190,10 +181,7 @@ pub struct App {
     pub last_edit_tick: u64,
     pub tick_count: u64,
 
-    // Startup status message
     pub status_message: Option<String>,
-
-    // Backend channel
     pub backend_tx: mpsc::Sender<BackendRequest>,
 }
 
@@ -278,7 +266,6 @@ impl App {
             return;
         }
 
-        // Check if the current context has an account set
         if let Ok(cfg) = logsh_core::config::load() {
             if let Some(ctx) = cfg.get_current_context() {
                 self.current_account = ctx.connection.default_account_name.clone();
@@ -406,7 +393,6 @@ impl App {
     pub fn mark_editor_dirty(&mut self) {
         self.parse_dirty = true;
         self.last_edit_tick = self.tick_count;
-        // Clear stale parse results when editing
         let text = self.editor_text();
         if text.trim().is_empty() {
             self.parse_result = None;
@@ -461,7 +447,6 @@ impl App {
             return;
         }
 
-        // Add to history
         self.add_to_history(&query);
         self.history_pos = None;
 
@@ -895,7 +880,7 @@ impl App {
 /// Simple base64 encode (no external dep needed for this).
 fn base64_encode(input: &[u8]) -> String {
     const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut result = String::with_capacity((input.len() + 2) / 3 * 4);
+    let mut result = String::with_capacity(input.len().div_ceil(3) * 4);
     for chunk in input.chunks(3) {
         let b0 = chunk[0] as u32;
         let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
