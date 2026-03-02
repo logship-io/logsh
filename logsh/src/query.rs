@@ -5,7 +5,7 @@ use std::{
 };
 
 use anyhow::{anyhow, Error};
-use clap::arg;
+
 use colored::Colorize;
 use logsh_core::{
     config,
@@ -33,66 +33,87 @@ pub fn markdown_style() -> TableStyle {
 }
 
 #[derive(Debug, clap::Args)]
-#[clap(about = "Execute a query against a logship server.")]
+#[clap(
+    about = "Execute a query against a logship server.",
+    long_about = "Execute a Kusto query against a Logship server.\n\n\
+        Reads the query from --query, --file, or from stdin if neither is provided.\n\
+        Supports multiple output formats for both human and machine consumption.\n\n\
+        Examples:\n  \
+        logsh query -q 'MyTable | take 10'\n  \
+        logsh query -f query.kql -o json\n  \
+        logsh query -q 'MyTable | count' -o json\n  \
+        echo 'MyTable | take 5' | logsh query -o csv"
+)]
 pub struct QueryCommand {
     #[arg(
         short,
         long,
-        help = "Query to execute. If not provided, will read from stdin."
+        help = "Query to execute. If not provided, reads from --file or stdin."
     )]
     query: Option<String>,
-
-    #[arg(short, long, help = "Output result format")]
-    output: Option<OutputMode>,
 
     #[arg(
         short,
         long,
-        help = "Query timeout. Use \"none\" to disable timeout.",
+        help = "Read query from a file (e.g. query.kql).",
+        conflicts_with = "query"
+    )]
+    file: Option<String>,
+
+    #[arg(
+        short,
+        long,
+        help = "Query timeout (e.g. '30s', '5m'). Use 'none' to disable.",
         default_value = "60s"
     )]
     timeout: OptionalDurationArg,
 }
 
-pub fn execute_query<W: Write>(command: QueryCommand, mut write: W) -> Result<(), Error> {
+pub fn execute_query<W: Write>(
+    command: QueryCommand,
+    output: Option<OutputMode>,
+    mut write: W,
+) -> Result<(), Error> {
     log::debug!("Entering query execution: {:?}", &command);
     let start = Instant::now();
 
     let query = if let Some(q) = command.query {
         log::trace!("Provided query: {}", &q);
         q
+    } else if let Some(path) = command.file {
+        log::debug!("Reading query from file: {}", &path);
+        std::fs::read_to_string(&path)
+            .map_err(|err| anyhow!("Failed to read query file \"{path}\": {err}"))?
     } else {
         log::debug!("Reading query from STDIN");
         let mut s = String::new();
         let _ = std::io::stdin()
             .read_to_string(&mut s)
-            .map_err(|err| anyhow!("Failed to read STDIN: {}", err))?;
+            .map_err(|err| anyhow!("Failed to read STDIN: {err}"))?;
         s
     };
 
     let cfg = config::load()?;
-    let connection: config::ConnectionConfig = cfg
-        .get_default_connection()
+    let connection: config::ContextConfig = cfg
+        .get_current_context()
         .ok_or(ConnectError::Config(ConfigError::NoDefaultConnection))?;
     log::info!("Starting query. Timeout = {}", &command.timeout);
     let r = connection
         .connection
         .query_raw(&query, command.timeout.into())
-        .map_err(|err| {
-            crate::fmt::print_query_error(&cfg, &query, &err);
-            err
+        .inspect_err(|err| {
+            crate::fmt::print_query_error(&cfg, &query, err);
         })?;
 
-    log::debug!("Response text: {:?}", r);
-    let result = logsh_core::query::result(&r).map_err(|err| {
-        crate::fmt::print_query_error(&cfg, &query, &err);
-        err
+    log::debug!("Response text: {r:?}");
+    let result = logsh_core::query::result(&r).inspect_err(|err| {
+        crate::fmt::print_query_error(&cfg, &query, err);
     })?;
     let query_duration = start.elapsed();
     let render_start = Instant::now();
     log::trace!("Finished query execution.");
     log::trace!("Processing result.");
-    match command.output.unwrap_or_default() {
+    match output.unwrap_or_default() {
         OutputMode::Table => {
             log::trace!("Outputting table");
             render_table(result, TableStyle::thin(), false, write)
@@ -103,7 +124,7 @@ pub fn execute_query<W: Write>(command: QueryCommand, mut write: W) -> Result<()
         }
         OutputMode::Json => {
             log::trace!("Outputting unformatted JSON");
-            writeln!(write, "{}", r)?;
+            writeln!(write, "{r}")?;
             Ok(())
         }
         OutputMode::JsonPretty => {
@@ -114,7 +135,7 @@ pub fn execute_query<W: Write>(command: QueryCommand, mut write: W) -> Result<()
         OutputMode::Csv => {
             log::trace!("Outputting CSV");
             logsh_core::csv::write_csv(&result, write)
-                .map_err(|e| anyhow!("Failed to convert to CSV: {}", e))
+                .map_err(|e| anyhow!("Failed to convert to CSV: {e}"))
         }
     }?;
 
@@ -158,7 +179,12 @@ fn render_table<W: Write>(
                     s.bright_white().bold().to_string()
                 }
             })
-            .map(|f| TableCell::builder(f).col_span(1).alignment(Alignment::Center).build()),
+            .map(|f| {
+                TableCell::builder(f)
+                    .col_span(1)
+                    .alignment(Alignment::Center)
+                    .build()
+            }),
     );
     header_row.has_separator = !is_markdown;
     table.add_row(header_row);
@@ -172,9 +198,15 @@ fn render_table<W: Write>(
                 if let Ok(json) =
                     serde_json::Value::from_str(json).and_then(|j| serde_json::to_string_pretty(&j))
                 {
-                    TableCell::builder(json).col_span(1).alignment(Alignment::Center).build()
+                    TableCell::builder(json)
+                        .col_span(1)
+                        .alignment(Alignment::Center)
+                        .build()
                 } else {
-                    TableCell::builder(json).col_span(1).alignment(Alignment::Center).build()
+                    TableCell::builder(json)
+                        .col_span(1)
+                        .alignment(Alignment::Center)
+                        .build()
                 }
             }
             _ => {
@@ -185,31 +217,49 @@ fn render_table<W: Write>(
                     if !is_markdown {
                         match json {
                             serde_json::Value::Null => {
-                                return TableCell::builder(
-                                    "<null>".bright_black()
-                                ).col_span(1).alignment(Alignment::Center).build()
+                                return TableCell::builder("<null>".bright_black())
+                                    .col_span(1)
+                                    .alignment(Alignment::Center)
+                                    .build()
                             }
                             serde_json::Value::Bool(b) => {
-                                return TableCell::builder(
-                                    if b { "true".green() } else { "false".red() }
-                                ).col_span(1).alignment(Alignment::Center).build()
+                                return TableCell::builder(if b {
+                                    "true".green()
+                                } else {
+                                    "false".red()
+                                })
+                                .col_span(1)
+                                .alignment(Alignment::Center)
+                                .build()
                             }
                             serde_json::Value::Number(n) => {
-                                return TableCell::builder(n).col_span(1).alignment(Alignment::Left).build()
+                                return TableCell::builder(n)
+                                    .col_span(1)
+                                    .alignment(Alignment::Left)
+                                    .build()
                             }
                             serde_json::Value::String(s) => {
-                                return TableCell::builder(s).col_span(1).alignment(Alignment::Center).build()
+                                return TableCell::builder(s)
+                                    .col_span(1)
+                                    .alignment(Alignment::Center)
+                                    .build()
                             }
                             _ => { /* noop */ }
                         }
                     }
 
                     if let Ok(serialized) = serde_json::to_string_pretty(&json) {
-                        return TableCell::builder(serialized).col_span(1).alignment(Alignment::Center).build();
+                        return TableCell::builder(serialized)
+                            .col_span(1)
+                            .alignment(Alignment::Center)
+                            .build();
                     }
                 }
 
-                TableCell::builder(json).col_span(1).alignment(Alignment::Center).build()
+                TableCell::builder(json)
+                    .col_span(1)
+                    .alignment(Alignment::Center)
+                    .build()
             }
         });
 
@@ -223,5 +273,5 @@ fn render_table<W: Write>(
     log::trace!("Render table.");
 
     let table = table.render();
-    writeln!(write, "{}", table).map_err(|e| anyhow!("Failed to write table: {}", e))
+    writeln!(write, "{table}").map_err(|e| anyhow!("Failed to write table: {e}"))
 }

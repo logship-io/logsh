@@ -17,10 +17,10 @@ Thumbs.db
 # Build artifacts
 target/
 */target/
-Cargo.lock
 
-# Docker files
-Dockerfile
+# Container files
+Containerfile
+Containerfile.*
 .dockerignore
 
 # GitHub workflows (not needed in container)

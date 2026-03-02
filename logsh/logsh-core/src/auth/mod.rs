@@ -9,18 +9,20 @@ use self::oauth::{OAuthData, OAuthFlow};
 pub mod jwt;
 pub mod oauth;
 
+/// Authentication data stored with a connection, either JWT or OAuth tokens.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum AuthData {
     Jwt {
         expires: Option<DateTime<Utc>>,
-        token: String
+        token: String,
     },
-    OAuth { 
+    OAuth {
         expires: Option<DateTime<Utc>>,
-        data: OAuthData
+        data: Box<OAuthData>,
     },
 }
 
+/// An authentication request specifying the method (JWT, PAT, or OAuth) and credentials.
 pub enum AuthRequest<F>
 where
     F: FnOnce() -> Result<String, ConnectError>,
@@ -28,6 +30,10 @@ where
     Jwt {
         username: String,
         password: F,
+    },
+    /// Personal Access Token authentication for CI/automation.
+    Pat {
+        token: String,
     },
     OAuth {
         client_id: String,
@@ -43,11 +49,17 @@ impl<F> AuthRequest<F>
 where
     F: FnOnce() -> Result<String, ConnectError>,
 {
-    pub fn authenticate(self, client: Client, connection: &Connection) -> Result<AuthData, ConnectError> {
+    /// Performs authentication using the configured method and returns the resulting [`AuthData`].
+    pub fn authenticate(
+        self,
+        client: Client,
+        connection: &Connection,
+    ) -> Result<AuthData, ConnectError> {
         match self {
             AuthRequest::Jwt { username, password } => {
-                return jwt::fetch_token(connection, &client, username, password);
+                jwt::fetch_token(connection, &client, username, password)
             }
+            AuthRequest::Pat { token } => jwt::fetch_pat_token(connection, &client, token),
             AuthRequest::OAuth {
                 client_id,
                 flow,
@@ -62,7 +74,7 @@ where
                 let mut token_endpoint = token_endpoint;
                 let mut device_endpoint = device_endpoint;
                 let mut scopes = vec![];
-                if client_id.trim() == "" {
+                if client_id.trim().is_empty() {
                     let oauth = connection.refresh_oauth()?;
                     client_id = oauth.client_id;
                     authorize_endpoint = oauth.authorize_endpoint;
@@ -72,7 +84,7 @@ where
                 }
 
                 let never = || -> Result<String, ConnectError> { Ok(String::new()) };
-                return oauth::authenticate(
+                oauth::authenticate(
                     connection,
                     &client,
                     None,
@@ -83,7 +95,7 @@ where
                     scopes,
                     device_endpoint,
                     flow,
-                );
+                )
             }
         }
     }

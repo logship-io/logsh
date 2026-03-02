@@ -8,26 +8,86 @@ on:
 name: Logsh CLI Build and Release
 
 jobs:
+  quality:
+    name: Quality (test + clippy + fmt)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: logsh
+          cache-all-crates: true
+      - name: Check formatting
+        run: cargo fmt -- --check
+        working-directory: ./logsh
+      - name: Clippy
+        run: cargo clippy -- -D warnings
+        working-directory: ./logsh
+      - name: Tests
+        run: cargo test
+        working-directory: ./logsh
+
   build:
+    needs: quality
     strategy:
       matrix:
         include:
           # Linux x86_64
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            cross: false
+          # Linux x86_64 musl (static, for containers)
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            cross: true
+            container_arch: amd64
+          # Linux aarch64
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            cross: true
+          # Linux aarch64 musl (static, for containers)
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+            cross: true
+            container_arch: arm64
+          # Linux ARMv7 (Raspberry Pi etc)
+          - os: ubuntu-latest
+            target: armv7-unknown-linux-gnueabihf
+            cross: true
+          # Linux ARMv7 musl (static, for containers)
+          - os: ubuntu-latest
+            target: armv7-unknown-linux-musleabihf
+            cross: true
+            container_arch: arm
+          # Linux ARM (older 32-bit ARM)
+          - os: ubuntu-latest
+            target: arm-unknown-linux-gnueabihf
+            cross: true
           # macOS Intel
           - os: macos-15
             target: x86_64-apple-darwin
+            cross: false
           # macOS Apple Silicon
           - os: macos-latest
             target: aarch64-apple-darwin
+            cross: false
           # Windows x86_64
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-    name: Build and Package (${{ matrix.target }})
+            cross: false
+          # Windows ARM64
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
+            cross: false
+          # FreeBSD x86_64
+          - os: ubuntu-latest
+            target: x86_64-unknown-freebsd
+            cross: true
+    name: Build (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
-    env:
-      PROJECT_NAME_UNDERSCORE: logsh
     steps:
       - uses: actions/checkout@v4
 
@@ -36,38 +96,57 @@ jobs:
         shell: pwsh
         run: |
           $Env:GIT_VERSION = $Env:GITHUB_REF -replace 'refs/.*/v', ''
-          (Get-Content ./logsh/Cargo.toml) -replace '^version\s+=\s+"([0-9\.]+)"\s*$', "version = `"$($Env:GIT_VERSION)`"" | Out-File ./logsh/Cargo.toml
+          foreach ($toml in @("./logsh/Cargo.toml", "./logsh/logsht/Cargo.toml")) {
+            (Get-Content $toml) -replace '^version\s+=\s+"([0-9\.]+)"\s*$', "version = `"$($Env:GIT_VERSION)`"" | Out-File $toml
+          }
           echo "Version should be $($Env:GIT_VERSION)"
           echo "----------------------------------------"
           cat ./logsh/Cargo.toml
+          cat ./logsh/logsht/Cargo.toml
 
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
-      
+
+      - name: Install cross
+        if: matrix.cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: logsh
           key: ${{ matrix.target }}
           cache-all-crates: true
-      
-      - name: Build
-        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Build (native)
+        if: ${{ !matrix.cross }}
+        run: cargo build --workspace --release --target ${{ matrix.target }}
         working-directory: ./logsh
-      
+
+      - name: Build (cross)
+        if: matrix.cross
+        run: cross build --workspace --release --target ${{ matrix.target }}
+        working-directory: ./logsh
+
       - name: Prepare artifacts
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path artifacts -Force
+          $target = "${{ matrix.target }}"
+          $releaseDir = "logsh/target/$target/release"
           if ("${{ matrix.os }}" -eq "windows-latest") {
-            $binaryPath = "logsh/target/${{ matrix.target }}/release/logsh.exe"
+            $ext = ".exe"
           } else {
-            $binaryPath = "logsh/target/${{ matrix.target }}/release/logsh"
+            $ext = ""
           }
-          $zipPath = "artifacts/logsh-${{ matrix.target }}.zip"
-          Compress-Archive -Path $binaryPath -DestinationPath $zipPath
-      
+          foreach ($bin in @("logsh", "logsht")) {
+            $binaryPath = "$releaseDir/$bin$ext"
+            if (Test-Path $binaryPath) {
+              Copy-Item $binaryPath "artifacts/$bin-$target$ext"
+            }
+          }
+
       - name: 'Upload Artifact'
         uses: actions/upload-artifact@v4
         with:
@@ -77,7 +156,7 @@ jobs:
   prerelease:
     name: Create pre-release
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
-    needs: build
+    needs: [build, container]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -98,28 +177,47 @@ jobs:
             artifacts/**/*
 
   container:
-    name: Build and Push Docker Image
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')
+    name: Container (${{ matrix.image }})
     runs-on: ubuntu-latest
     needs: build
+    strategy:
+      matrix:
+        include:
+          - image: logsh
+            file: ./build/Containerfile.logsh
+            suffix: ""
+          - image: logsht
+            file: ./build/Containerfile.logsht
+            suffix: /logsht
     steps:
       - uses: actions/checkout@v4
-      
+
+      - name: Download musl artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: build
+          pattern: logsh-cli-*musl*
+          merge-multiple: true
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      
+
       - name: Log in to GitHub Container Registry
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      
+
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }}
+          images: ghcr.io/${{ github.repository }}${{ matrix.suffix }}
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
@@ -127,31 +225,38 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
             type=raw,value=latest-pre,enable=${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' }}
 
-      - name: Inject Tag Version
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: pwsh
-        run: |
-          $Env:GIT_VERSION = $Env:GITHUB_REF -replace 'refs/.*/v', ''
-          (Get-Content ./logsh/Cargo.toml) -replace '^version\s+=\s+"([0-9\.]+)"\s*$', "version = `"$($Env:GIT_VERSION)`"" | Out-File ./logsh/Cargo.toml
-          echo "Version should be $($Env:GIT_VERSION)"
-          echo "----------------------------------------"
-          cat ./logsh/Cargo.toml
-      
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+      - name: Build and push container image
+        uses: docker/build-push-action@v6
         with:
-          context: .
-          push: true
-          platforms: linux/amd64
+          context: ./build
+          file: ${{ matrix.file }}
+          push: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v') }}
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,scope=${{ matrix.image }},mode=max
+
+      - name: Export OCI tar
+        uses: docker/build-push-action@v6
+        with:
+          context: ./build
+          file: ${{ matrix.file }}
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          tags: ${{ matrix.image }}:latest
+          cache-from: type=gha,scope=${{ matrix.image }}
+          outputs: type=oci,dest=${{ matrix.image }}-oci.tar
+
+      - name: Upload OCI image
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.image }}-oci
+          path: ${{ matrix.image }}-oci.tar
 
   release:
     name: Create release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [build, container]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
