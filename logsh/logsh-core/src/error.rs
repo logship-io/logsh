@@ -27,6 +27,8 @@ pub enum CommonError {
 /// Errors related to configuration loading, saving, and path resolution.
 #[derive(Debug, Error)]
 pub enum ConfigError {
+    #[error("Context '{0}' is not active or does not exist. Run logsh context list, then logsh context use <name>.")]
+    ContextNotFound(String),
     #[error("Unable to determine home directory")]
     NoHome,
 
@@ -51,13 +53,15 @@ pub enum ConfigError {
     #[error("No default connection found.")]
     NoDefaultConnection,
 
-    #[error("No default account found.")]
+    #[error("No account selected. Run logsh account list, then logsh account use <name-or-id>.")]
     NoDefaultAccount,
 }
 
 /// Errors produced by [`LogshClient`](crate::logship_client::LogshClient) operations.
 #[derive(Debug, Error)]
 pub enum ClientError {
+    #[error("HTTP {status}: {message}")]
+    Http { status: u16, message: String },
     #[error("{0}")]
     Common(CommonError),
     #[error("Failed to load config: {0}")]
@@ -103,6 +107,8 @@ pub enum QueryError {
 /// Errors that can occur during file upload.
 #[derive(Debug, Error)]
 pub enum UploadError {
+    #[error("{0}")]
+    Connection(#[from] ConnectError),
     #[error("{0}")]
     Common(CommonError),
     #[error("{0}")]

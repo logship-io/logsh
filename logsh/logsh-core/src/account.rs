@@ -4,6 +4,31 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 
+pub fn resolve_account<'a>(
+    accounts: &'a [AccountsModel],
+    selector: &str,
+) -> Result<&'a AccountsModel, crate::error::ConnectError> {
+    let id = uuid::Uuid::parse_str(selector).ok();
+    let matches: Vec<_> = accounts
+        .iter()
+        .filter(|a| {
+            id.map_or_else(
+                || a.account_name.eq_ignore_ascii_case(selector),
+                |id| a.account_id == id,
+            )
+        })
+        .collect();
+    match matches.as_slice() {
+        [account] => Ok(account),
+        [] => Err(crate::error::ConnectError::InvalidConfigError(format!(
+            "Account '{selector}' is not accessible. Run logsh account list."
+        ))),
+        _ => Err(crate::error::ConnectError::InvalidConfigError(format!(
+            "Account name '{selector}' is ambiguous. Use an account UUID."
+        ))),
+    }
+}
+
 /// Model representing a user's account with its permissions.
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

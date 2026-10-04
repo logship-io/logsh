@@ -5,7 +5,10 @@ A command-line interface for interacting with [Logship](https://logship.io). Que
 ## Quick Start
 
 ```bash
-# Add a context
+# Start guided setup (interactive terminal)
+logsh
+
+# Or add a context directly, then choose an account when prompted
 logsh ctx add https://my.logship.server
 
 # Check status
@@ -55,7 +58,8 @@ logsh version --update-prerelease  # Latest dev build
 logsh ctx add https://logship.example.com --name prod
 
 # Add with Personal Access Token (CI/automation)
-logsh ctx add https://logship.example.com --pat --token $LOGSH_PAT_TOKEN
+logsh ctx add https://logship.example.com --pat --account <account-name-or-id>
+# Token comes from LOGSH_PAT_TOKEN; --token-stdin also accepts a piped token.
 
 # Add with OAuth device flow
 logsh ctx add https://logship.example.com --sso
@@ -70,12 +74,29 @@ logsh ctx use prod
 # Show current context
 logsh ctx current
 
+# Show all contexts/accounts and common actions
+logsh ctx
+
 # Re-authenticate
 logsh ctx login
+
+# Re-authenticate in a script using a password piped to stdin
+logsh ctx login prod --password-stdin
 
 # Remove a context
 logsh ctx rm old-ctx
 ```
+
+Login never chooses an account automatically, even when only one is available.
+Interactive setup asks you to choose; scripts supply `--account <name-or-id>`.
+Re-login retains a saved selection while it remains accessible. Authentication with
+no accessible accounts saves the context and explains why account commands are unavailable.
+Canceling setup leaves existing configuration intact.
+
+Without a terminal, bare `logsh` prints setup instructions instead of prompting.
+With a connection, it shows status, server, user, account, and useful next commands.
+Use `--help` for compact help and `--help-all` for advanced options. `--config-path`
+and `LOGSH_CONFIG_PATH` may point to a configuration file that does not exist yet.
 
 ### Queries
 
@@ -123,9 +144,84 @@ logsh schema describe MyTable
 logsh acc ls
 logsh acc ls --include-all
 logsh acc use <account-name>
+logsh acc use <account-id>
 logsh acc current
+logsh acc show
+logsh acc permissions
+logsh acc create <name>              # Generates an ID; --id supplies one
+logsh acc update --name <new-name>
 logsh acc delete <account-id>
 ```
+
+Account names match without case sensitivity; ambiguous names require a UUID.
+An invalid `--account` or `--context` fails rather than falling back to another
+account or server. Command overrides do not change the saved selection.
+
+### Account Users and Permissions
+
+```bash
+logsh account users list
+logsh account users list -o json
+logsh account users show <user-id>
+logsh account users add <username> --permission <permission-name>
+logsh account users remove <user-id>
+
+# Preserve unrelated permissions
+logsh account users permissions grant <user-id> --permission <permission-name>
+logsh account users permissions revoke <user-id> --permission <permission-name>
+
+# Replace the full list; repeat --permission as needed
+logsh account users permissions set <user-id> --permission <permission-name>
+logsh account users permissions set <user-id> --clear
+
+logsh account users schema-permissions list <user-id>
+logsh account users schema-permissions set <user-id> --file permissions.json
+logsh account users schema-permissions set <user-id> --file -
+logsh account users schema-permissions set <user-id> --clear
+```
+
+`users add` may create a user invitation and send email through the backend.
+Grant/revoke reads the current permission list and writes a replacement; concurrent
+permission edits are not atomic. The backend validates permission names and access.
+`account permissions` displays the caller's permissions; `users show` displays a
+specific user's permissions.
+
+Schema-permission input is an array matching the API, for example:
+
+```json
+[
+  {
+    "schemaName": "Logs",
+    "canRead": true,
+    "canWrite": false,
+    "columns": [
+      { "columnName": "Message", "canRead": true, "canWrite": false }
+    ]
+  }
+]
+```
+
+Use `--clear` to replace permissions with an empty list.
+
+### Account Settings and Groups
+
+```bash
+logsh account settings list
+logsh account settings set <setting-name> --value-json 'true'
+logsh account settings set <setting-name> --value-json '"a string"'
+
+logsh account groups list
+logsh account groups create <name> --description "Operations team"
+logsh account groups update <group-id> --name <new-name>
+logsh account groups delete <group-id>
+logsh account groups members list <group-id>
+logsh account groups members add <group-id> <user-id>
+logsh account groups members remove <group-id> <user-id>
+```
+
+New group IDs are generated unless `--id` is supplied. Settings and membership
+commands use the selected account or the temporary `--account` override. All new
+administration commands support table, JSON, pretty JSON, CSV, and Markdown output.
 
 ### Shell Completions
 
@@ -150,7 +246,7 @@ logsh completions powershell >> $PROFILE
 | `-v` / `-vvvv` | Increase verbosity (error → warn → info → debug → trace) |
 | `--no-color` | Disable colored output |
 | `--context <name>` | Use a specific named context |
-| `--account <name>` | Override the account for a command (by name) |
+| `--account <name-or-id>` | Override the account for a command; setup persists this choice |
 | `--config-path <path>` | Override config file location |
 | `-o <format>` | Output format: `table`, `json`, `json-pretty`, `csv`, `markdown` |
 | `--quiet` | Suppress non-essential output |
@@ -208,6 +304,22 @@ services:
 logsht
 ```
 
+With no contexts, `logsht` opens a login form. Enter the server and context name,
+choose password, PAT, or SSO using Left/Right on the authentication field, and press
+Enter to log in. Tab/Shift+Tab moves between fields; passwords and tokens are masked.
+SSO displays the browser URL and device code while the UI stays responsive.
+Choose an account to complete setup. Esc cancels without saving the pending login.
+
+The bottom row always shows the main controls: **F1 Commands**, **F2 Account**,
+**F3 Context**, and **F4 Login**. F1 opens a searchable menu with descriptions;
+type to filter, use Up/Down to select, and Enter to run a command. F2 opens the
+account picker directly, including while editing a query.
+
+Use F4 to re-authenticate or choose `context add` from the F1 menu to connect to another server.
+In the context switcher, Ctrl+A adds a context and Ctrl+L opens login. Expired
+authentication opens the login form. Account administration is available through
+the `logsh account` commands.
+
 ### Layout
 
 logsht has three main panes:
@@ -220,6 +332,10 @@ logsht has three main panes:
 
 | Key | Action |
 |-----|--------|
+| `F1` | Browse and search commands |
+| `F2` | Choose account |
+| `F3` | Open context switcher |
+| `F4` | Log in to the current context |
 | `Tab` / `Shift+Tab` | Cycle focus: Schemas → Editor → Results |
 | `Alt+Enter` / `Ctrl+R` | Execute query |
 | `Ctrl+K` | Open context switcher |
@@ -265,7 +381,8 @@ logsht has three main panes:
 
 ### Commands
 
-Commands are entered via the command bar (`:` key):
+Press F1 to browse, search, and run commands. You can also enter them via the
+command bar (`:` key):
 
 | Command | Description |
 |---------|-------------|
@@ -273,6 +390,8 @@ Commands are entered via the command bar (`:` key):
 | `:refresh` | Reload schemas from server |
 | `:clear` | Clear query and results |
 | `:ctx` | Open context switcher |
+| `:login` | Log in to the current context |
+| `:context add` | Add a context through the login form |
 | `:help` | Show keybindings |
 | `:account` | Open account picker |
 | `:saved` | Open saved queries |
@@ -288,8 +407,9 @@ Commands are entered via the command bar (`:` key):
 ```bash
 cd logsh && cargo build          # Debug build
 cd logsh && cargo build --release  # Release build
-cd logsh && cargo test           # Run tests
-cd logsh && cargo clippy -- -D warnings  # Lint
+cd logsh && cargo test --workspace       # Run CLI, core API, and TUI tests
+cd logsh && cargo clippy --workspace --all-targets -- -D warnings  # Lint
+cd logsh && cargo fmt --all -- --check   # Formatting
 ```
 
 ### Tags

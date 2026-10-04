@@ -46,54 +46,24 @@ pub struct ContextConfig {
 }
 
 impl Configuration {
-    /// Returns the active context, respecting the global override, then falling back
-    /// to the configured current context, then the first available context.
+    /// Resolves a context without falling back to an unrelated server.
+    pub fn resolve_current_context(&self) -> Result<ContextConfig, ConfigError> {
+        let name = get_context_override().unwrap_or(&self.current_context);
+        self.contexts
+            .get(name)
+            .map(|connection| ContextConfig {
+                name: name.to_owned(),
+                connection: connection.clone(),
+            })
+            .ok_or_else(|| ConfigError::ContextNotFound(name.to_owned()))
+    }
+    /// Returns the active context, respecting the global override.
     pub fn get_current_context(&self) -> Option<ContextConfig> {
-        if self.contexts.is_empty() {
-            return None;
-        }
-
-        // Check global override first
-        if let Some(override_name) = get_context_override() {
-            if let Some(c) = self.contexts.get(override_name) {
-                return Some(ContextConfig {
-                    name: override_name.to_string(),
-                    connection: c.clone(),
-                });
-            }
-            log::warn!("Context override \"{override_name}\" does not exist, falling back to current context.");
-        }
-
-        if let Some(c) = self.contexts.get(&self.current_context) {
-            return Some(ContextConfig {
-                name: self.current_context.clone(),
-                connection: c.clone(),
-            });
-        }
-
-        let conn = self.contexts.iter().next();
-        if let Some((name, _conn)) = conn {
-            log::warn!(
-                "Current context \"{}\" does not exist. Updating to \"{}\".",
-                &self.current_context,
-                name
-            );
-        }
-
-        match conn {
-            Some((name, conn)) => Some(ContextConfig {
-                name: name.to_string(),
-                connection: conn.clone(),
-            }),
-            None => {
-                log::error!("No contexts found.");
-                None
-            }
-        }
+        self.resolve_current_context().ok()
     }
 }
 
-/// Returns the path to the logsh configuration file, creating parent directories if needed.
+/// Returns the configuration path without creating directories.
 pub fn get_configuration_path() -> Result<PathBuf, ConfigError> {
     let path = CONFIG_PATH.get_or_init(|| {
         if let Ok(path) = std::env::var("LOGSH_CONFIG_PATH") {
@@ -101,17 +71,10 @@ pub fn get_configuration_path() -> Result<PathBuf, ConfigError> {
                 log::trace!(
                     "Environment override of config path: {}={}",
                     "LOGSH_CONFIG_PATH",
-                    &path
+                    path
                 );
 
                 let path = PathBuf::from(&path);
-                if !path.exists() {
-                    return Err(ConfigError::InvalidConfigPath(format!(
-                        "{} does not exist.",
-                        &path.to_string_lossy()
-                    )));
-                }
-
                 return Ok(path);
             }
         }
@@ -123,16 +86,7 @@ pub fn get_configuration_path() -> Result<PathBuf, ConfigError> {
                 h
             })
             .ok_or(ConfigError::NoHome)?;
-        log::trace!("Configuration path: {}", &path.display());
-        if let Some(parent) = path.parent() {
-            if !parent.exists() {
-                log::debug!(
-                    "Configuration parent doesn't exist. Creating: {}",
-                    parent.display()
-                );
-                std::fs::create_dir_all(parent)?;
-            }
-        }
+        log::trace!("Configuration path: {}", path.display());
 
         Ok(path)
     });
@@ -160,6 +114,9 @@ pub fn load() -> Result<Configuration, ConfigError> {
 /// Serializes and writes the configuration to disk.
 pub fn save(config: Configuration) -> Result<Configuration, ConfigError> {
     let path = get_configuration_path()?;
+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        fs::create_dir_all(parent)?;
+    }
     let serialized: String =
         serde_json::to_string(&config).map_err(ConfigError::FailedSerialize)?;
     fs::write(&path, serialized).map_err(ConfigError::FailedWrite)?;

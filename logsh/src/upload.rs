@@ -34,16 +34,12 @@ pub struct UploadCommand {
 
 pub fn execute_upload(args: UploadCommand, output: Option<OutputMode>) -> Result<(), Error> {
     let cfg = config::load()?;
-    let connection = cfg
-        .contexts
-        .get(&cfg.current_context)
-        .or_else(|| cfg.contexts.values().next())
-        .ok_or(anyhow::anyhow!("Connection does not exist"))?;
+    let connection = cfg.resolve_current_context()?.connection;
     let is_json = matches!(output, Some(OutputMode::Json | OutputMode::JsonPretty));
     logsh_core::upload::execute(
         &args.schema,
         &args.path,
-        connection,
+        &connection,
         args.timeout.into(),
         args.progress && !is_json,
     )?;

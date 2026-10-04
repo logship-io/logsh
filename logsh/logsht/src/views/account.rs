@@ -9,11 +9,11 @@ use ratatui::{
 use crate::app::App;
 
 pub fn draw(f: &mut Frame, app: &App) {
-    let area = super::centered_rect(50, 50, f.area());
+    let area = super::centered_rect(85, 60, f.area());
     f.render_widget(Clear, area);
 
     let block = Block::default()
-        .title(" Select Account (Enter to choose, Esc to close) ")
+        .title(" Choose account: Enter select, Esc cancel ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Green));
 
@@ -24,7 +24,7 @@ pub fn draw(f: &mut Frame, app: &App) {
 
     let filtered = app.filtered_accounts();
 
-    let items: Vec<ListItem> = filtered
+    let mut items: Vec<ListItem> = filtered
         .iter()
         .map(|(_, acct)| {
             let marker = if acct.is_current { "● " } else { "  " };
@@ -35,9 +35,18 @@ pub fn draw(f: &mut Frame, app: &App) {
             } else {
                 Style::default().fg(Color::White)
             };
-            ListItem::new(format!("{marker}{}", acct.name)).style(style)
+            ListItem::new(format!("{marker}{} ({})", acct.name, acct.id)).style(style)
         })
         .collect();
+    if items.is_empty() {
+        items.push(ListItem::new(
+            if app.status_message.as_deref() == Some("Loading accounts...") {
+                "Loading accounts..."
+            } else {
+                "No accounts match."
+            },
+        ));
+    }
 
     let list = List::new(items)
         .block(block)

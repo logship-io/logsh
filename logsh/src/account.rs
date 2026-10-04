@@ -1,4 +1,3 @@
-use anyhow::anyhow;
 use clap::Subcommand;
 use logsh_core::{
     account::{delete_account, list_accounts},
@@ -16,6 +15,30 @@ use crate::{query::markdown_style, OutputMode};
 #[derive(Subcommand)]
 #[clap(visible_alias = "acc", about = "Account management.")]
 pub enum AccountCommand {
+    /// Show the selected account's details.
+    Show,
+    /// Create an account; generates an ID when omitted.
+    Create {
+        name: String,
+        #[arg(long)]
+        id: Option<uuid::Uuid>,
+    },
+    /// Rename the selected account.
+    Update {
+        #[arg(long)]
+        name: String,
+    },
+    /// Show your permissions in this account.
+    Permissions,
+    /// Manage account users and permissions.
+    #[command(subcommand)]
+    Users(crate::administration::UsersCommand),
+    /// Manage account settings.
+    #[command(subcommand)]
+    Settings(crate::administration::SettingsCommand),
+    /// Manage groups and group membership.
+    #[command(subcommand)]
+    Groups(crate::administration::GroupsCommand),
     #[clap(about = "List accounts", visible_alias = "ls")]
     List {
         #[arg(long, help = "Include all accounts.")]
@@ -43,23 +66,22 @@ pub fn execute_account(
     output: Option<OutputMode>,
 ) -> Result<(), anyhow::Error> {
     match command {
+        command @ (AccountCommand::Show
+        | AccountCommand::Create { .. }
+        | AccountCommand::Update { .. }
+        | AccountCommand::Permissions
+        | AccountCommand::Users(_)
+        | AccountCommand::Settings(_)
+        | AccountCommand::Groups(_)) => crate::administration::execute(command, output),
         AccountCommand::Use { name } => {
             let default_config = logsh_core::config::load()?;
-            let default_connection = default_config
-                .get_current_context()
-                .ok_or(anyhow!("No current context found."))?;
+            let default_connection = default_config.resolve_current_context()?;
             let conn_handler = LogshClientHandler::new();
 
             let accounts =
                 list_accounts(&conn_handler, default_connection.connection.user_id, false)?;
 
-            let account = accounts
-                .iter()
-                .find(|s| s.account_name.eq_ignore_ascii_case(&name))
-                .ok_or(anyhow!(
-                    "Account \"{}\" not found. Run 'logsh account list' to see available accounts.",
-                    &name
-                ))?;
+            let account = logsh_core::account::resolve_account(&accounts, &name)?;
 
             let mut config = default_config;
             config.contexts.iter_mut().for_each(|c| {
@@ -91,11 +113,9 @@ pub fn execute_account(
         }
         AccountCommand::Current => {
             let default_config = logsh_core::config::load()?;
-            let ctx = default_config
-                .get_current_context()
-                .ok_or(anyhow!("No current context found."))?;
+            let ctx = default_config.resolve_current_context()?;
 
-            match ctx.connection.default_account() {
+            match ctx.connection.effective_account()? {
                 Some(account_id) => {
                     let conn_handler = LogshClientHandler::new();
                     let accounts = list_accounts(&conn_handler, ctx.connection.user_id, false)?;
@@ -146,9 +166,7 @@ pub fn execute_account(
         }
         AccountCommand::List { include_all } => {
             let mut config = logsh_core::config::load()?;
-            let default_connection = config
-                .get_current_context()
-                .ok_or(anyhow!("No current context found."))?;
+            let default_connection = config.resolve_current_context()?;
             let conn_handler = LogshClientHandler::new();
 
             let accounts = list_accounts(
@@ -163,7 +181,7 @@ pub fn execute_account(
                 let _ = logsh_core::config::save(config.clone());
             }
 
-            let effective = default_connection.connection.effective_account();
+            let effective = default_connection.connection.effective_account()?;
 
             match output {
                 Some(OutputMode::Json) => {

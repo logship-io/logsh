@@ -102,14 +102,14 @@ pub fn execute<'a>(
         .ok_or(UploadError::UnsupportedFileExtension("".to_string()))
         .map(|e| e.to_string_lossy())?;
 
-    let sub = &connection.default_account().ok_or(UploadError::Config(
-        crate::error::ConfigError::NoDefaultConnection,
+    let sub = &connection.effective_account()?.ok_or(UploadError::Config(
+        crate::error::ConfigError::NoDefaultAccount,
     ))?;
 
     let client = crate::connect::client_builder().timeout(timeout).build()?;
     let req = client.post(format!(
         "{}/inflow/{}/{}/{}",
-        &connection.server.trim_end_matches("/"),
+        connection.server.trim_end_matches("/"),
         sub,
         schema_str,
         ext,

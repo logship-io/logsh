@@ -8,9 +8,11 @@ use clap::{
     },
     Parser, Subcommand, ValueEnum,
 };
+use clap::{CommandFactory, FromArgMatches};
 use colored::Colorize;
 
 mod account;
+mod administration;
 mod config;
 mod connect;
 mod fmt;
@@ -42,7 +44,7 @@ pub mod exit_codes {
         and administer accounts. Supports multiple output formats (table, JSON,\n\
         CSV, markdown) for both human and machine consumption.\n\n\
         Get started:\n  \
-        logsh context add basic myctx https://my.logship.server\n  \
+        logsh context add https://my.logship.server --name myctx\n  \
         logsh query -q 'MyTable | take 10'\n\n\
         Environment variables:\n  \
         LOGSH_CONFIG_PATH  Override config file location\n  \
@@ -80,7 +82,7 @@ struct Args {
     #[arg(
         long,
         global = true,
-        help = "Override the account for this command (by name)"
+        help = "Use an account name or UUID for this command"
     )]
     account: Option<String>,
 
@@ -109,11 +111,120 @@ fn styles() -> Styles {
         .placeholder(AnsiColor::Green.on_default())
 }
 
+fn cli_command(full: bool) -> clap::Command {
+    fn compact(mut cmd: clap::Command, full: bool, root: bool) -> clap::Command {
+        cmd = cmd
+            .disable_help_flag(true)
+            .next_line_help(false)
+            .term_width(80)
+            .arg(
+                clap::Arg::new("help")
+                    .short('h')
+                    .long("help")
+                    .action(clap::ArgAction::HelpShort)
+                    .help("Show help"),
+            )
+            .arg(
+                clap::Arg::new("help-all")
+                    .long("help-all")
+                    .action(clap::ArgAction::HelpLong)
+                    .help("Show all options"),
+            )
+            .mut_args(|mut a| {
+                let advanced = matches!(
+                    a.get_id().as_str(),
+                    "verbose"
+                        | "no_color"
+                        | "config_path"
+                        | "quiet"
+                        | "oauth_flow"
+                        | "password"
+                        | "token"
+                );
+                let hidden = a.is_hide_set() || (!full && advanced);
+                let id = a.get_id().as_str().to_owned();
+                if matches!(
+                    id.as_str(),
+                    "sso"
+                        | "pat"
+                        | "username"
+                        | "password"
+                        | "password_stdin"
+                        | "token"
+                        | "token_stdin"
+                        | "oauth_flow"
+                ) {
+                    a = a.help_heading("Authentication");
+                }
+                if matches!(
+                    id.as_str(),
+                    "context"
+                        | "account"
+                        | "output"
+                        | "config_path"
+                        | "verbose"
+                        | "no_color"
+                        | "quiet"
+                ) {
+                    a = a.help_heading("Global options");
+                }
+                if !full {
+                    a = match id.as_str() {
+                        "context" => a.help("Use a named context"),
+                        "account" => a.help("Use an account name or UUID"),
+                        "output" => {
+                            a.help("Output format (table, json, json-pretty, csv, markdown)")
+                        }
+                        _ => a,
+                    };
+                }
+                if a.get_action().takes_values() {
+                    a = a.hide_possible_values(!full);
+                }
+                a.next_line_help(false)
+                    .hide_env_values(true)
+                    .hide_env(!full)
+                    .hide(hidden)
+            });
+        if !full {
+            cmd = cmd.long_about(None::<&str>);
+        }
+        if cmd.get_name() == "add" && cmd.get_arguments().any(|arg| arg.get_id() == "server") {
+            cmd=cmd.before_help("Connect: logsh context add https://logship.example.com\nSSO:     logsh context add https://logship.example.com --sso\nScripts: logsh context add <server> --pat --token-stdin --account <name-or-id>");
+        }
+        if cmd.get_name() == "login" {
+            cmd=cmd.before_help("Login: logsh context login [name]\nScripts: logsh context login --password-stdin --account <name-or-id>");
+        }
+        if root {
+            cmd = cmd.before_help("Get started: logsh context add <server-url>\nQuery:       logsh query -q 'MyTable | take 10'\nUsers:       logsh account users list")
+                .after_help("Global flags: --context <name>, --account <name-or-id>, -o <format>\nMore options: --help-all");
+        } else {
+            cmd = cmd.after_help("Use --help-all for advanced and global options.");
+        }
+        let children: Vec<_> = cmd.get_subcommands().cloned().collect();
+        for child in children {
+            let name = child.get_name().to_owned();
+            cmd = cmd.mut_subcommand(name, |c| compact(c, full, false));
+        }
+        cmd
+    }
+    compact(Args::command(), full, true)
+}
+
+fn parse_args() -> Args {
+    let args: Vec<_> = std::env::args_os().collect();
+    let full = args.iter().any(|a| a == "--help-all");
+    let matches = cli_command(full).get_matches_from(args);
+    Args::from_arg_matches(&matches).unwrap_or_else(|e| e.exit())
+}
+
 #[derive(Subcommand)]
 enum Commands {
     /// Manage contexts (server connections).
-    #[clap(subcommand)]
-    Context(crate::config::ContextCommand),
+    Context {
+        #[command(subcommand)]
+        command: Option<crate::config::ContextCommand>,
+    },
 
     /// View and manage logsh configuration.
     #[command(subcommand)]
@@ -157,15 +268,7 @@ enum Commands {
 }
 
 fn main() {
-    // Pre-parse: if args are exactly ["context"|"ctx"] with no subcommand, inject "current"
-    let args: Vec<String> = std::env::args().collect();
-    let effective_args = if args.len() == 2 && matches!(args[1].as_str(), "context" | "ctx") {
-        vec![args[0].clone(), args[1].clone(), "current".to_string()]
-    } else {
-        args
-    };
-
-    let cli = Args::parse_from(effective_args);
+    let cli = parse_args();
     let log_level = match cli.verbose {
         0 => log::LevelFilter::Error,
         1 => log::LevelFilter::Warn,
@@ -211,7 +314,7 @@ fn main() {
                     eprintln!("{}: {err}", "error".red().bold());
                 }
             }
-            std::process::exit(exit_codes::ERROR);
+            std::process::exit(error_exit_code(&err));
         }
     }
 }
@@ -219,8 +322,11 @@ fn main() {
 fn run(cli: Args) -> Result<i32, Error> {
     let output = cli.output;
     match cli.command {
-        Some(Commands::Context(command)) => {
-            crate::connect::execute_context(command, output)?;
+        Some(Commands::Context { command }) => {
+            crate::connect::execute_context(
+                command.unwrap_or(crate::config::ContextCommand::Overview),
+                output,
+            )?;
             Ok(exit_codes::SUCCESS)
         }
         Some(Commands::Query(command)) => {
@@ -252,7 +358,7 @@ fn run(cli: Args) -> Result<i32, Error> {
             Ok(exit_codes::SUCCESS)
         }
         Some(Commands::Completions { shell }) => {
-            let mut cmd = <Args as clap::CommandFactory>::command();
+            let mut cmd = cli_command(true);
             clap_complete::generate(shell, &mut cmd, "logsh", &mut std::io::stdout());
             Ok(exit_codes::SUCCESS)
         }
@@ -282,43 +388,105 @@ fn run(cli: Args) -> Result<i32, Error> {
             match conn {
                 Some(conn) => match conn.connection.who_am_i() {
                     Ok(user) => {
-                        let sub = conn
-                            .connection
-                            .effective_account()
-                            .map_or("None".to_string(), |s| s.to_string());
+                        let selected = conn.connection.effective_account()?;
+                        let sub = selected.map_or("None".to_string(), |s| s.to_string());
+                        let account_name = if selected == conn.connection.default_account {
+                            conn.connection.default_account_name.as_deref()
+                        } else {
+                            logsh_core::config::get_account_override()
+                        };
                         match output {
                             Some(OutputMode::Json | OutputMode::JsonPretty) => {
                                 fmt::print_json(&serde_json::json!({
                                     "status": "connected",
                                     "connection": conn.name,
+                                    "server": conn.connection.server,
                                     "user": user.user_name,
                                     "account": sub,
+                                    "accountName": account_name,
                                 }));
                             }
                             _ => {
                                 println!("Status: {}", "Connected".green());
+                                println!("Server: {}", conn.connection.server);
                                 println!(
                                     "Connection: {}  User: {}  Account: {}",
-                                    &conn.name.blue(),
-                                    &user.user_name.blue(),
-                                    sub.blue()
+                                    conn.name.blue(),
+                                    user.user_name.blue(),
+                                    account_name.unwrap_or(&sub).blue()
                                 );
+                                println!("Try: logsh query -q 'MyTable | take 10'\n     logsh schema list\n     logsh account users list\n     logsh context");
                             }
                         }
                         Ok(exit_codes::SUCCESS)
                     }
                     Err(err) => {
-                        fmt::print_connect_error(&cfg, &err);
+                        if matches!(output, Some(OutputMode::Json | OutputMode::JsonPretty)) {
+                            eprintln!(
+                                "{}",
+                                serde_json::json!({"error":err.to_string(),"nextCommand":"logsh context login"})
+                            );
+                        } else {
+                            fmt::print_connect_error(&cfg, &err);
+                        }
                         Ok(exit_codes::AUTH_ERROR)
                     }
                 },
                 None => {
-                    fmt::print_add_connection_help();
-                    Ok(exit_codes::NOT_CONFIGURED)
+                    if !cfg.contexts.is_empty()
+                        || logsh_core::config::get_context_override().is_some()
+                    {
+                        cfg.resolve_current_context()?;
+                    }
+                    if connect::interactive(output) {
+                        connect::guided_setup(output)?;
+                        Ok(exit_codes::SUCCESS)
+                    } else {
+                        if matches!(output, Some(OutputMode::Json | OutputMode::JsonPretty)) {
+                            fmt::print_json(
+                                &serde_json::json!({"status":"notConfigured", "nextCommand":"logsh context add <server> --account <name-or-id>"}),
+                            );
+                        } else {
+                            fmt::print_add_connection_help();
+                        }
+                        Ok(exit_codes::NOT_CONFIGURED)
+                    }
                 }
             }
         }
     }
+}
+
+fn error_exit_code(err: &Error) -> i32 {
+    use logsh_core::error::{AuthError, ClientError, ConfigError, ConnectError};
+    for cause in err.chain() {
+        if cause.downcast_ref::<AuthError>().is_some() {
+            return exit_codes::AUTH_ERROR;
+        }
+        if matches!(
+            cause.downcast_ref::<ClientError>(),
+            Some(ClientError::NoToken | ClientError::Http { status: 401, .. })
+        ) {
+            return exit_codes::AUTH_ERROR;
+        }
+        if let Some(ConnectError::Network(error)) = cause.downcast_ref::<ConnectError>() {
+            if error.status() == Some(logsh_core::reqwest::StatusCode::UNAUTHORIZED) {
+                return exit_codes::AUTH_ERROR;
+            }
+        }
+        if let Some(error) = cause.downcast_ref::<logsh_core::reqwest::Error>() {
+            if error.status() == Some(logsh_core::reqwest::StatusCode::UNAUTHORIZED) {
+                return exit_codes::AUTH_ERROR;
+            }
+        }
+        if matches!(
+            cause.downcast_ref::<ConfigError>(),
+            Some(ConfigError::NoDefaultConnection | ConfigError::ContextNotFound(_))
+        ) {
+            return exit_codes::NOT_CONFIGURED;
+        }
+    }
+    exit_codes::ERROR
 }
 
 #[derive(Copy, Clone, Debug, Default, ValueEnum)]

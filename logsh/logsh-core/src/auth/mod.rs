@@ -6,6 +6,11 @@ use crate::{connect::Connection, error::ConnectError};
 
 use self::oauth::{OAuthData, OAuthFlow};
 
+#[derive(Debug, Clone)]
+pub enum AuthEvent {
+    DeviceCode { url: String, code: String },
+}
+
 pub mod jwt;
 pub mod oauth;
 
@@ -55,6 +60,21 @@ where
         client: Client,
         connection: &Connection,
     ) -> Result<AuthData, ConnectError> {
+        self.authenticate_with_events(
+            client,
+            connection,
+            &|_| {},
+            &std::sync::atomic::AtomicBool::new(false),
+        )
+    }
+
+    pub fn authenticate_with_events(
+        self,
+        client: Client,
+        connection: &Connection,
+        observer: &dyn Fn(AuthEvent),
+        cancelled: &std::sync::atomic::AtomicBool,
+    ) -> Result<AuthData, ConnectError> {
         match self {
             AuthRequest::Jwt { username, password } => {
                 jwt::fetch_token(connection, &client, username, password)
@@ -64,7 +84,7 @@ where
                 client_id,
                 flow,
                 device_endpoint,
-                scopes: _,
+                scopes,
                 authorize_endpoint,
                 token_endpoint,
             } => {
@@ -72,7 +92,7 @@ where
                 let mut authorize_endpoint = authorize_endpoint;
                 let mut token_endpoint = token_endpoint;
                 let mut device_endpoint = device_endpoint;
-                let mut scopes = vec![];
+                let mut scopes = scopes;
                 if client_id.trim().is_empty() {
                     let oauth = connection.refresh_oauth()?;
                     client_id = oauth.client_id;
@@ -94,6 +114,8 @@ where
                     scopes,
                     device_endpoint,
                     flow,
+                    observer,
+                    cancelled,
                 )
             }
         }

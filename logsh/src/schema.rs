@@ -3,10 +3,7 @@ use std::io::Write;
 use anyhow::{anyhow, Error};
 use clap::Subcommand;
 use colored::Colorize;
-use logsh_core::{
-    config,
-    error::{ConfigError, ConnectError},
-};
+use logsh_core::config;
 use term_table::{
     row::Row,
     table_cell::{Alignment, TableCell},
@@ -42,9 +39,7 @@ pub fn execute_schema<W: Write>(
 
 fn list_tables<W: Write>(output: Option<OutputMode>, mut write: W) -> Result<(), Error> {
     let cfg = config::load()?;
-    let ctx = cfg
-        .get_current_context()
-        .ok_or(ConnectError::Config(ConfigError::NoDefaultConnection))?;
+    let ctx = cfg.resolve_current_context()?;
 
     let r = ctx
         .connection
@@ -116,9 +111,7 @@ fn describe_table<W: Write>(
     mut write: W,
 ) -> Result<(), Error> {
     let cfg = config::load()?;
-    let ctx = cfg
-        .get_current_context()
-        .ok_or(ConnectError::Config(ConfigError::NoDefaultConnection))?;
+    let ctx = cfg.resolve_current_context()?;
 
     let r = ctx
         .connection

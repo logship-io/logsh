@@ -1,4 +1,5 @@
 pub mod account;
+pub mod administration;
 pub mod auth;
 pub mod common;
 pub mod config;
@@ -7,5 +8,6 @@ pub mod csv;
 pub mod error;
 pub mod logship_client;
 pub mod query;
+pub mod session;
 pub mod upload;
 pub use reqwest;

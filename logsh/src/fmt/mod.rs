@@ -90,7 +90,7 @@ fn print_reqwest_error(_cfg: &Configuration, err: &logsh_core::reqwest::Error) {
 }
 
 pub fn print_add_connection_help() {
-    eprintln!("Run {} to get started.", "logsh context add --help".blue(),);
+    eprintln!("Welcome to logsh. Connect with: logsh context add <server-url>\nExamples:\n  logsh context add https://logship.example.com --account <name>\n  logsh context add https://logship.example.com --pat --token-stdin --account <name>\nThen: logsh schema list, logsh query -q 'MyTable | take 10'\nHelp: logsh --help");
 }
 
 pub(crate) fn print_config_error(err: &ConfigError) {

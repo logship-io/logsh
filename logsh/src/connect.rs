@@ -1,12 +1,7 @@
 use anyhow::{anyhow, Error};
 
 use colored::Colorize;
-use logsh_core::{
-    config,
-    connect::Connection,
-    error::{AuthError, BasicAuthError, ConnectError},
-    query::QueryResultFmt,
-};
+use logsh_core::{config, error::ConnectError, query::QueryResultFmt};
 use std::io::IsTerminal;
 use std::{collections::HashMap, io::Write};
 use term_table::{
@@ -61,13 +56,7 @@ pub fn execute_context(command: ContextCommand, output: Option<OutputMode>) -> R
                     .get(&name)
                     .ok_or(anyhow!("Context not found"))?;
                 let accounts = conn.accounts(conn.user_id).map_err(|e| anyhow!("{e}"))?;
-                let account = accounts
-                    .iter()
-                    .find(|a| a.account_name.eq_ignore_ascii_case(&account_name))
-                    .ok_or(anyhow!(
-                        "Account \"{}\" not found. Run 'logsh account list' to see available accounts.",
-                        &account_name
-                    ))?;
+                let account = logsh_core::account::resolve_account(&accounts, &account_name)?;
                 let conn_mut = cfg.contexts.get_mut(&name).unwrap();
                 conn_mut.default_account = Some(account.account_id);
                 conn_mut.default_account_name = Some(account.account_name.clone());
@@ -85,99 +74,65 @@ pub fn execute_context(command: ContextCommand, output: Option<OutputMode>) -> R
             }
             Ok(())
         }
-        ContextCommand::Login { name } => {
-            let cfg = logsh_core::config::load()?;
-            let conn = if let Some(name) = name.as_ref() {
-                cfg.contexts.get(name).map(|c| config::ContextConfig {
-                    name: name.clone(),
-                    connection: c.clone(),
-                })
+        ContextCommand::Login(args) => {
+            let ctx = if let Some(name) = args.name {
+                config::ContextConfig {
+                    connection: cfg
+                        .contexts
+                        .get(&name)
+                        .ok_or_else(|| anyhow!("Context '{name}' not found"))?
+                        .clone(),
+                    name,
+                }
             } else {
-                cfg.get_current_context()
+                cfg.resolve_current_context()?
             };
-
-            match conn {
-                Some(connection_config) => {
-                    let server = connection_config.connection.server.clone();
-                    let ctx_name = connection_config.name.clone();
-                    if connection_config.connection.is_jwt_auth() {
-                        let mut cfg = config::load()?;
-                        execute_add_context(
-                            &mut cfg,
-                            AddContextArgs {
-                                server,
-                                name: Some(ctx_name),
-                                sso: false,
-                                pat: false,
-                                username: Some(connection_config.connection.username.clone()),
-                                password: None,
-                                password_stdin: false,
-                                token: None,
-                                token_stdin: false,
-                                oauth_flow: OAuthFlow::Device,
-                                no_default: true,
-                            },
-                            output,
-                        )
-                    } else if connection_config.connection.is_oauth_auth() {
-                        let mut cfg = config::load()?;
-                        execute_add_context(
-                            &mut cfg,
-                            AddContextArgs {
-                                server,
-                                name: Some(ctx_name),
-                                sso: true,
-                                pat: false,
-                                username: None,
-                                password: None,
-                                password_stdin: false,
-                                token: None,
-                                token_stdin: false,
-                                oauth_flow: OAuthFlow::Device,
-                                no_default: true,
-                            },
-                            output,
-                        )
-                    } else {
-                        let err = ConnectError::InvalidConfigError(
-                            "No authentication defined for this context.".to_string(),
-                        );
-                        crate::fmt::print_connect_error(&cfg, &err);
-                        Err(anyhow!("Invalid Auth Configuration: {err}"))
-                    }
-                }
-                None => {
-                    let err = ConnectError::NoConnection(name.unwrap_or_default().to_string());
-                    crate::fmt::print_connect_error(&cfg, &err);
-                    Err(anyhow!("Invalid Input: {err}"))
-                }
+            let method = ctx.connection.auth_method.as_deref().unwrap_or(
+                if ctx.connection.is_oauth_auth() {
+                    "sso"
+                } else {
+                    "password"
+                },
+            );
+            execute_add_context(
+                &mut cfg,
+                AddContextArgs {
+                    server: ctx.connection.server.clone(),
+                    name: Some(ctx.name),
+                    sso: args.sso || (!args.pat && args.username.is_none() && method == "sso"),
+                    pat: args.pat || (!args.sso && args.username.is_none() && method == "pat"),
+                    username: args.username.or(Some(ctx.connection.username)),
+                    password: args.password,
+                    password_stdin: args.password_stdin,
+                    token: args.token,
+                    token_stdin: args.token_stdin,
+                    oauth_flow: OAuthFlow::Device,
+                    no_default: true,
+                },
+                output,
+            )
+        }
+        ContextCommand::Overview => {
+            list(std::io::stdout(), output)?;
+            if output.is_none() || matches!(output, Some(OutputMode::Table)) {
+                println!("\nAdd: logsh context add <server>\nLogin: logsh context login [name]\nSwitch: logsh context use <name>\nAccount: logsh account use <name-or-id>");
             }
+            Ok(())
         }
         ContextCommand::Current => {
-            let cfg = config::load()?;
-            match cfg.get_current_context() {
-                Some(conn) => {
-                    let account_display = conn
-                        .connection
-                        .default_account_name
-                        .as_deref()
-                        .unwrap_or("(none)");
-                    match output {
-                        Some(OutputMode::Json | OutputMode::JsonPretty) => {
-                            crate::fmt::print_json(&serde_json::json!({
-                                "name": conn.name,
-                                "account": account_display,
-                            }));
-                        }
-                        _ => println!("{} (account: {})", conn.name, account_display),
-                    }
-                    Ok(())
-                }
-                None => {
-                    crate::fmt::print_add_connection_help();
-                    Err(anyhow!("No contexts configured"))
-                }
+            let conn = cfg.resolve_current_context()?;
+            let account_display = conn
+                .connection
+                .default_account_name
+                .as_deref()
+                .unwrap_or("(none)");
+            let value = serde_json::json!({"name":conn.name,"server":conn.connection.server,"account":account_display,"accountId":conn.connection.default_account});
+            match output {
+                Some(OutputMode::Json) => crate::fmt::print_json(&value),
+                Some(OutputMode::JsonPretty) => crate::fmt::print_json_pretty(&value),
+                _ => println!("{} (account: {})", conn.name, account_display),
             }
+            Ok(())
         }
     }
 }
@@ -190,6 +145,11 @@ fn read_stdin_line() -> Result<String, Error> {
 }
 
 fn derive_context_name(server: &str) -> String {
+    if let Ok(url) = logsh_core::reqwest::Url::parse(server) {
+        if let Some(host) = url.host_str() {
+            return host.to_owned();
+        }
+    }
     let s = server
         .trim_start_matches("https://")
         .trim_start_matches("http://")
@@ -198,170 +158,183 @@ fn derive_context_name(server: &str) -> String {
     s.split(':').next().unwrap_or(s).to_string()
 }
 
+pub fn interactive(output: Option<OutputMode>) -> bool {
+    std::io::stdin().is_terminal()
+        && std::io::stderr().is_terminal()
+        && (output.is_none() || matches!(output, Some(OutputMode::Table)))
+}
+fn prompt(label: &str) -> Result<String, Error> {
+    eprint!("{label}: ");
+    std::io::stderr().flush()?;
+    let value = read_stdin_line()?;
+    if value.is_empty() {
+        return Err(anyhow!("Setup cancelled; no configuration changed."));
+    }
+    Ok(value)
+}
+pub fn guided_setup(output: Option<OutputMode>) -> Result<(), Error> {
+    eprintln!("Welcome to logsh. Connect to your Logship server to get started.\nLeave a required field empty to cancel.");
+    let server = prompt("Server URL (https://...)")?;
+    eprint!("Context name [{}]: ", derive_context_name(&server));
+    std::io::stderr().flush()?;
+    let name = read_stdin_line()?;
+    let method = prompt("Authentication: 1 password, 2 Personal Access Token, 3 SSO")?;
+    if !matches!(method.as_str(), "1" | "2" | "3") {
+        return Err(anyhow!("Choose 1, 2, or 3."));
+    }
+    execute_add_context(
+        &mut config::load()?,
+        AddContextArgs {
+            server,
+            name: if name.is_empty() { None } else { Some(name) },
+            sso: method == "3",
+            pat: method == "2",
+            username: None,
+            password: None,
+            password_stdin: false,
+            token: None,
+            token_stdin: false,
+            oauth_flow: OAuthFlow::Device,
+            no_default: false,
+        },
+        output,
+    )
+}
 fn execute_add_context(
     cfg: &mut config::Configuration,
     args: AddContextArgs,
     output: Option<OutputMode>,
 ) -> Result<(), Error> {
+    use logsh_core::session::{LoginMethod, LoginRequest};
     let name = args
         .name
         .unwrap_or_else(|| derive_context_name(&args.server));
-    let set_default = !args.no_default;
-
-    match (args.sso, args.pat) {
-        (false, false) => {
-            log::trace!("Adding basic auth context \"{name}\".");
-            let username = match args.username {
-                Some(u) => u,
-                None => {
-                    println!(
-                        "{} {}{}",
-                        "Please enter your logship".cyan(),
-                        "username".cyan().bold(),
-                        ":".cyan(),
-                    );
-                    let mut username = String::new();
-                    std::io::stdin().read_line(&mut username)?;
-                    username.trim().to_string()
-                }
-            };
-
-            let password = if args.password_stdin {
-                Some(read_stdin_line()?)
-            } else {
-                args.password
-            };
-            let username_for_prompt = username.clone();
-            let connection = Connection::new(&args.server);
-            let auth = Some(logsh_core::auth::AuthRequest::Jwt {
-                username: username.clone(),
-                password: move || {
-                    if let Some(password) = password {
-                        return Result::<String, ConnectError>::Ok(password);
-                    }
-                    rpassword::prompt_password(format!(
-                        "{} {}{}{} ",
-                        "Please enter".cyan(),
-                        username_for_prompt.bright_blue().bold(),
-                        "'s password".cyan().bold(),
-                        ":".cyan(),
-                    ))
-                    .map_err(BasicAuthError::IOError)
-                    .map_err(AuthError::BasicAuth)
-                    .map_err(ConnectError::Auth)
-                },
-            });
-
-            let c = logsh_core::connect::add_connect(name.clone(), Some(connection), auth);
-            match c {
-                Ok(connection) => {
-                    if set_default || cfg.contexts.is_empty() {
-                        cfg.current_context = name.clone();
-                    }
-                    cfg.contexts.insert(name.clone(), connection);
-                    config::save(cfg.clone()).inspect_err(|err| {
-                        crate::fmt::print_config_error(err);
-                    })?;
-                    if let Some(OutputMode::Json | OutputMode::JsonPretty) = output {
-                        crate::fmt::print_json(&serde_json::json!({
-                            "status": "ok",
-                            "message": format!("Context \"{name}\" added")
-                        }));
-                    }
-                    Ok(())
-                }
-                Err(err) => {
-                    crate::fmt::print_connect_error(cfg, &err);
-                    Err(anyhow!("Error adding context: {err}"))
-                }
-            }
-        }
-        (true, false) => {
-            let connection = Connection::new(&args.server);
-            let c = logsh_core::connect::add_connect::<
-                Box<dyn FnOnce() -> Result<String, ConnectError>>,
-            >(
-                name.clone(),
-                Some(connection),
-                Some(logsh_core::auth::AuthRequest::OAuth {
-                    client_id: String::default(),
-                    device_endpoint: None,
-                    scopes: vec![],
-                    authorize_endpoint: String::default(),
-                    token_endpoint: String::default(),
-                    flow: match args.oauth_flow {
-                        OAuthFlow::Device => logsh_core::auth::oauth::OAuthFlow::Device,
-                    },
-                }),
-            )
-            .inspect_err(|err| {
-                crate::fmt::print_connect_error(cfg, err);
-            })?;
-
-            if set_default || cfg.contexts.is_empty() {
-                cfg.current_context = name.clone();
-            }
-            cfg.contexts.insert(name.clone(), c);
-            config::save(cfg.clone()).inspect_err(|err| {
-                crate::fmt::print_config_error(err);
-            })?;
-            if let Some(OutputMode::Json | OutputMode::JsonPretty) = output {
-                crate::fmt::print_json(&serde_json::json!({
-                    "status": "ok",
-                    "message": format!("Context \"{name}\" added")
-                }));
-            }
-            Ok(())
-        }
-        (false, true) => {
-            let token = if args.token_stdin {
-                Some(read_stdin_line()?)
-            } else {
-                args.token
-            };
-            let token = match token {
-                Some(t) => t,
-                None if std::io::stdin().is_terminal() => rpassword::prompt_password(format!(
-                    "{} {}",
-                    "Enter Personal Access Token:".cyan(),
-                    "".bright_black(),
-                ))
-                .map_err(|e| anyhow!("Failed to read token: {e}"))?,
-                None => {
-                    return Err(anyhow!(
-                        "Provide --token, --token-stdin, or set LOGSH_PAT_TOKEN env var."
-                    ));
-                }
-            };
-            let connection = Connection::new(&args.server);
-            let c = logsh_core::connect::add_connect::<
-                Box<dyn FnOnce() -> Result<String, ConnectError>>,
-            >(
-                name.clone(),
-                Some(connection),
-                Some(logsh_core::auth::AuthRequest::Pat { token }),
-            )
-            .inspect_err(|err| {
-                crate::fmt::print_connect_error(cfg, err);
-            })?;
-
-            if set_default || cfg.contexts.is_empty() {
-                cfg.current_context = name.clone();
-            }
-            cfg.contexts.insert(name.clone(), c);
-            config::save(cfg.clone()).inspect_err(|err| {
-                crate::fmt::print_config_error(err);
-            })?;
-            if let Some(OutputMode::Json | OutputMode::JsonPretty) = output {
-                crate::fmt::print_json(&serde_json::json!({
-                    "status": "ok",
-                    "message": format!("Context \"{name}\" added")
-                }));
-            }
-            Ok(())
-        }
-        (true, true) => unreachable!("clap arg group prevents --sso and --pat together"),
+    let name = name.trim().to_owned();
+    if name.is_empty() {
+        return Err(anyhow!("Context name must not be empty."));
     }
+    let can_prompt = interactive(output);
+    let method = if args.sso {
+        LoginMethod::Sso
+    } else if args.pat {
+        LoginMethod::Pat
+    } else {
+        LoginMethod::Password
+    };
+    let username = if method == LoginMethod::Password {
+        match args.username {
+            Some(u) => u,
+            None if can_prompt => prompt("Username")?,
+            None => {
+                return Err(anyhow!(
+                    "Provide --username and --password-stdin (or --password)."
+                ))
+            }
+        }
+    } else {
+        String::new()
+    };
+    let secret = match method {
+        LoginMethod::Password => {
+            if args.password_stdin {
+                read_stdin_line()?
+            } else if let Some(p) = args.password {
+                p
+            } else if can_prompt {
+                rpassword::prompt_password("Password: ")?
+            } else {
+                return Err(anyhow!("Provide --password-stdin or --password."));
+            }
+        }
+        LoginMethod::Pat => {
+            if args.token_stdin {
+                read_stdin_line()?
+            } else if let Some(t) = args.token {
+                t
+            } else if can_prompt {
+                rpassword::prompt_password("Personal Access Token: ")?
+            } else {
+                return Err(anyhow!(
+                    "Provide --token, --token-stdin, or LOGSH_PAT_TOKEN."
+                ));
+            }
+        }
+        LoginMethod::Sso => {
+            if !can_prompt {
+                return Err(anyhow!(
+                    "SSO device login requires a terminal. Use PAT authentication for scripts."
+                ));
+            }
+            String::new()
+        }
+    };
+    let mut connection = logsh_core::session::authenticate(
+        LoginRequest {
+            server: args.server,
+            method,
+            username,
+            secret,
+        },
+        cfg.contexts.get(&name).cloned(),
+        &|event| {
+            let logsh_core::auth::AuthEvent::DeviceCode { url, code } = event;
+            eprintln!("Open {url} in your browser and enter code {code}.");
+        },
+        &std::sync::atomic::AtomicBool::new(false),
+    )?;
+    let accounts = connection.accounts(connection.user_id)?;
+    if let Some(selector) = config::get_account_override() {
+        let account = logsh_core::account::resolve_account(&accounts, selector)?;
+        connection.default_account = Some(account.account_id);
+        connection.default_account_name = Some(account.account_name.clone());
+    } else if connection.default_account.is_none() && !accounts.is_empty() {
+        if !can_prompt {
+            return Err(anyhow!(
+                "Choose an account with --account <name-or-id>; no configuration changed."
+            ));
+        }
+        let mut accounts = accounts;
+        accounts.sort_by(|a, b| {
+            a.account_name
+                .cmp(&b.account_name)
+                .then(a.account_id.cmp(&b.account_id))
+        });
+        eprintln!("Select the account to use:");
+        for (i, a) in accounts.iter().enumerate() {
+            eprintln!("  {}. {} ({})", i + 1, a.account_name, a.account_id);
+        }
+        let choice = prompt("Account number, name, or UUID")?;
+        let account = if let Ok(index) = choice.parse::<usize>() {
+            accounts
+                .get(index.wrapping_sub(1))
+                .ok_or_else(|| anyhow!("Invalid account number"))?
+        } else {
+            logsh_core::account::resolve_account(&accounts, &choice)?
+        };
+        connection.default_account = Some(account.account_id);
+        connection.default_account_name = Some(account.account_name.clone());
+    }
+    let account = connection.default_account_name.clone();
+    let mut updated = cfg.clone();
+    if !args.no_default || updated.contexts.is_empty() {
+        updated.current_context = name.clone();
+    }
+    updated.contexts.insert(name.clone(), connection);
+    config::save(updated.clone())?;
+    *cfg = updated;
+    match output {
+        Some(OutputMode::Json) => crate::fmt::print_json(
+            &serde_json::json!({"status":"ok", "context":name, "account":account}),
+        ),
+        Some(OutputMode::JsonPretty) => crate::fmt::print_json_pretty(
+            &serde_json::json!({"status":"ok", "context":name, "account":account}),
+        ),
+        _ => println!(
+            "Connected to {name}. Account: {}\nTry: logsh schema list",
+            account.as_deref().unwrap_or("no accessible accounts")
+        ),
+    }
+    Ok(())
 }
 
 fn list<W: Write>(mut write: W, mode: Option<OutputMode>) -> Result<(), Error> {

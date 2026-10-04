@@ -8,6 +8,14 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 
 pub type Tui = Terminal<CrosstermBackend<io::Stdout>>;
 
+/// Restore raw mode and the alternate screen on normal exits and errors.
+pub struct RestoreGuard;
+impl Drop for RestoreGuard {
+    fn drop(&mut self) {
+        let _ = restore();
+    }
+}
+
 /// Initialize the terminal for TUI rendering.
 pub fn init() -> anyhow::Result<Tui> {
     terminal::enable_raw_mode()?;

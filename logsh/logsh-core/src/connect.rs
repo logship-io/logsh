@@ -25,6 +25,8 @@ pub struct Connection {
     /// Cached list of known account names for this context (for completions/display).
     #[serde(default)]
     pub known_accounts: Vec<String>,
+    #[serde(default)]
+    pub auth_method: Option<String>,
     auth: Option<AuthData>,
 }
 
@@ -90,32 +92,20 @@ impl Connection {
             default_account: None,
             default_account_name: None,
             known_accounts: Vec::new(),
+            auth_method: None,
             auth: None,
         }
     }
 
     /// Returns the effective default account UUID, respecting the global account override.
     /// If an override is set, fetches accounts and resolves the name to a UUID.
-    pub fn effective_account(&self) -> Option<uuid::Uuid> {
+    pub fn effective_account(&self) -> Result<Option<uuid::Uuid>, ConnectError> {
         if let Some(override_name) = crate::config::get_account_override() {
-            match self.accounts(self.user_id) {
-                Ok(accounts) => {
-                    if let Some(account) = accounts
-                        .iter()
-                        .find(|a| a.account_name.eq_ignore_ascii_case(override_name))
-                    {
-                        return Some(account.account_id);
-                    }
-                    log::warn!(
-                        "Account override \"{override_name}\" not found, falling back to default."
-                    );
-                }
-                Err(err) => {
-                    log::warn!("Failed to resolve account override \"{override_name}\": {err}");
-                }
-            }
+            let accounts = self.accounts(self.user_id)?;
+            return crate::account::resolve_account(&accounts, override_name)
+                .map(|a| Some(a.account_id));
         }
-        self.default_account
+        Ok(self.default_account)
     }
 
     /// Returns the default account UUID, if set.
@@ -169,7 +159,7 @@ impl Connection {
             .send()?
             .error_for_status()?;
         if res.status() == StatusCode::NO_CONTENT {
-            return Err(AuthError::OAuth(OAuthError::ConfigurationError(
+            Err(AuthError::OAuth(OAuthError::ConfigurationError(
                 oauth2::ConfigurationError::MissingUrl("oauth is not configured for this server"),
             )))?;
         }
@@ -182,7 +172,7 @@ impl Connection {
         let client = client_builder().build()?;
         let response: UserModel = self
             .authenticate_request(
-                client.get(format!("{}/whoami", &self.server.trim_end_matches('/'))),
+                client.get(format!("{}/whoami", self.server.trim_end_matches('/'))),
             )
             .send()?
             .error_for_status()?
@@ -195,7 +185,7 @@ impl Connection {
         let response: Vec<AccountsModel> = self
             .authenticate_request(client.get(format!(
                 "{}/users/{}/accounts",
-                &self.server.trim_end_matches('/'),
+                self.server.trim_end_matches('/'),
                 user
             )))
             .send()?
@@ -204,7 +194,7 @@ impl Connection {
         Ok(response)
     }
 
-    fn post_auth_setup(&mut self) -> Result<(), ConnectError> {
+    pub fn post_auth_setup(&mut self) -> Result<(), ConnectError> {
         let user = self.who_am_i()?;
         let mut subs = self.accounts(user.user_id)?;
         subs.sort_by(|a, b| a.account_name.cmp(&b.account_name));
@@ -212,9 +202,9 @@ impl Connection {
         self.username = user.user_name;
         self.known_accounts = subs.iter().map(|s| s.account_name.clone()).collect();
 
-        if self.default_account.is_none() {
-            self.default_account = subs.first().map(|s| s.account_id);
-        }
+        self.default_account = self
+            .default_account
+            .filter(|id| subs.iter().any(|a| a.account_id == *id));
         self.default_account_name = self.default_account.and_then(|id| {
             subs.iter()
                 .find(|s| s.account_id == id)
@@ -225,6 +215,18 @@ impl Connection {
     }
 
     pub fn refresh_auth<F>(&mut self, auth: Option<AuthRequest<F>>) -> Result<(), ConnectError>
+    where
+        F: FnOnce() -> Result<String, ConnectError>,
+    {
+        self.refresh_auth_with_events(auth, &|_| {}, &std::sync::atomic::AtomicBool::new(false))
+    }
+
+    pub fn refresh_auth_with_events<F>(
+        &mut self,
+        auth: Option<AuthRequest<F>>,
+        observer: &dyn Fn(crate::auth::AuthEvent),
+        cancelled: &std::sync::atomic::AtomicBool,
+    ) -> Result<(), ConnectError>
     where
         F: FnOnce() -> Result<String, ConnectError>,
     {
@@ -255,7 +257,15 @@ impl Connection {
                 }
             },
             (_, Some(a)) => {
-                let auth = a.authenticate(client, self)?;
+                self.auth_method = Some(
+                    match &a {
+                        AuthRequest::Jwt { .. } => "password",
+                        AuthRequest::Pat { .. } => "pat",
+                        AuthRequest::OAuth { .. } => "sso",
+                    }
+                    .to_owned(),
+                );
+                let auth = a.authenticate_with_events(client, self, observer, cancelled)?;
                 self.auth = Some(auth);
                 Ok(())
             }
@@ -275,13 +285,13 @@ impl Connection {
         };
 
         let sub = &self
-            .effective_account()
+            .effective_account()?
             .ok_or(QueryError::Config(ConfigError::NoDefaultAccount))?;
         let client = client_builder().build()?;
         let req = self
             .authenticate_request(client.post(format!(
                 "{}/search/{}/kusto/parse",
-                &self.server.trim_end_matches('/'),
+                self.server.trim_end_matches('/'),
                 sub
             )))
             .json(&req)
@@ -330,13 +340,13 @@ impl Connection {
         };
 
         let sub = &self
-            .effective_account()
+            .effective_account()?
             .ok_or(QueryError::Config(ConfigError::NoDefaultAccount))?;
         let client = client_builder().timeout(timeout).build()?;
         let req = self
             .authenticate_request(client.post(format!(
                 "{}/search/{}/kusto",
-                &self.server.trim_end_matches('/'),
+                self.server.trim_end_matches('/'),
                 sub
             )))
             .json(&req)
@@ -395,7 +405,7 @@ pub(crate) fn client_builder() -> reqwest::blocking::ClientBuilder {
         })
 }
 
-/// Adds or updates a named connection in the configuration, authenticating and persisting it.
+/// Authenticates a connection. Frontends persist it only after account selection completes.
 pub fn add_connect<F>(
     name: String,
     mut connection: Option<Connection>,
@@ -425,7 +435,6 @@ where
             }
         }?;
 
-        let _cfg = config::save(cfg)?;
         c
     };
 

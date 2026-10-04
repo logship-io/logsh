@@ -7,10 +7,7 @@ use std::{
 use anyhow::{anyhow, Error};
 
 use colored::Colorize;
-use logsh_core::{
-    config,
-    error::{ConfigError, ConnectError},
-};
+use logsh_core::config;
 use term_table::{
     row::Row,
     table_cell::{Alignment, TableCell},
@@ -74,7 +71,7 @@ pub fn execute_query<W: Write>(
     output: Option<OutputMode>,
     mut write: W,
 ) -> Result<(), Error> {
-    log::debug!("Entering query execution: {:?}", &command);
+    log::debug!("Entering query execution: {:?}", command);
     let start = Instant::now();
 
     let query = if let Some(q) = command.query {
@@ -91,10 +88,8 @@ pub fn execute_query<W: Write>(
     };
 
     let cfg = config::load()?;
-    let connection: config::ContextConfig = cfg
-        .get_current_context()
-        .ok_or(ConnectError::Config(ConfigError::NoDefaultConnection))?;
-    log::info!("Starting query. Timeout = {}", &command.timeout);
+    let connection: config::ContextConfig = cfg.resolve_current_context()?;
+    log::info!("Starting query. Timeout = {}", command.timeout);
     let r = connection
         .connection
         .query_raw(&query, command.timeout.into())

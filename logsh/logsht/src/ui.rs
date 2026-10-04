@@ -8,6 +8,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     views::query::draw(f, app, f.area());
 
     match &app.overlay {
+        Some(Overlay::Commands) => views::commands::draw(f, app),
+        Some(Overlay::Login) => crate::login::draw(f, app),
         Some(Overlay::ContextSwitcher) => views::context::draw(f, app),
         Some(Overlay::AccountPicker) => views::account::draw(f, app),
         Some(Overlay::SavedQueries) => views::saved_queries::draw(f, app),
