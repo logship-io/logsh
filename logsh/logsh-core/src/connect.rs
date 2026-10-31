@@ -393,16 +393,20 @@ pub struct OAuthConfigResponse {
 static USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"),);
 
 pub(crate) fn client_builder() -> reqwest::blocking::ClientBuilder {
-    reqwest::blocking::Client::builder()
-        .user_agent(USER_AGENT)
-        .default_headers({
-            let mut h = HeaderMap::new();
-            let host = gethostname::gethostname().to_string_lossy().to_string();
-            if let Ok(host) = HeaderValue::from_str(&host) {
-                h.insert("x-ls-hostname", host);
-            }
-            h
-        })
+    reqwest::blocking::Client::builder().default_headers(client_headers())
+}
+
+pub(crate) fn client_headers() -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        reqwest::header::USER_AGENT,
+        HeaderValue::from_static(USER_AGENT),
+    );
+    let host = gethostname::gethostname().to_string_lossy().to_string();
+    if let Ok(host) = HeaderValue::from_str(&host) {
+        headers.insert("x-ls-hostname", host);
+    }
+    headers
 }
 
 /// Authenticates a connection. Frontends persist it only after account selection completes.

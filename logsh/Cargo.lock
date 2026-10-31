@@ -1489,16 +1489,19 @@ dependencies = [
 name = "logsh-core"
 version = "0.0.1"
 dependencies = [
+ "bytes",
  "chrono",
  "csv",
  "gethostname",
  "home",
+ "http-body",
  "log",
  "oauth2",
  "reqwest 0.13.2",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "tokio",
  "uuid",
 ]
 

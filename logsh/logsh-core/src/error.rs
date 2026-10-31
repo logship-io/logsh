@@ -128,6 +128,15 @@ pub enum UploadError {
     #[error("Failed to upload, status: {0}, message: {1}")]
     UploadFailureStatus(i32, String),
 
+    #[error("Upload interrupted after reading {bytes_read} of {total_bytes} bytes: {details}")]
+    Interrupted {
+        bytes_read: u64,
+        total_bytes: u64,
+        details: String,
+        #[source]
+        source: reqwest::Error,
+    },
+
     #[error("File IO error: {0}")]
     FileIO(#[from] std::io::Error),
 }

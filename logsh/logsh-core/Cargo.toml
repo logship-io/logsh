@@ -17,3 +17,6 @@ uuid = { version = "1.21.0", features = ["serde"] }
 chrono = "0.4.44"
 oauth2 = { version = "5.0.0", default-features = false, features = ["reqwest", "reqwest-blocking", "rustls-tls"] }
 gethostname = "1.1.0"
+tokio = { version = "1.49.0", features = ["rt", "fs", "io-util"] }
+bytes = "1.11.1"
+http-body = "1.0.1"
