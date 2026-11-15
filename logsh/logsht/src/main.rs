@@ -2,6 +2,7 @@ mod app;
 mod backend;
 mod event;
 mod input;
+mod login;
 mod tui;
 mod ui;
 mod views;
@@ -18,6 +19,7 @@ fn main() -> anyhow::Result<()> {
     let (resp_tx, resp_rx) = mpsc::channel();
     let backend_handle = backend::spawn_backend(req_rx, resp_tx);
     let mut terminal = tui::init()?;
+    let _restore_guard = tui::RestoreGuard;
     let mut app = App::new(req_tx.clone());
     app.init();
 
@@ -35,9 +37,11 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
+    app.cancel_login();
     let _ = req_tx.send(BackendRequest::Shutdown);
-    let _ = backend_handle.join();
-    tui::restore()?;
+    if backend_handle.is_finished() {
+        let _ = backend_handle.join();
+    }
 
     Ok(())
 }

@@ -27,6 +27,8 @@ pub enum CommonError {
 /// Errors related to configuration loading, saving, and path resolution.
 #[derive(Debug, Error)]
 pub enum ConfigError {
+    #[error("Context '{0}' is not active or does not exist. Run logsh context list, then logsh context use <name>.")]
+    ContextNotFound(String),
     #[error("Unable to determine home directory")]
     NoHome,
 
@@ -51,13 +53,15 @@ pub enum ConfigError {
     #[error("No default connection found.")]
     NoDefaultConnection,
 
-    #[error("No default account found.")]
+    #[error("No account selected. Run logsh account list, then logsh account use <name-or-id>.")]
     NoDefaultAccount,
 }
 
 /// Errors produced by [`LogshClient`](crate::logship_client::LogshClient) operations.
 #[derive(Debug, Error)]
 pub enum ClientError {
+    #[error("HTTP {status}: {message}")]
+    Http { status: u16, message: String },
     #[error("{0}")]
     Common(CommonError),
     #[error("Failed to load config: {0}")]
@@ -104,6 +108,8 @@ pub enum QueryError {
 #[derive(Debug, Error)]
 pub enum UploadError {
     #[error("{0}")]
+    Connection(#[from] ConnectError),
+    #[error("{0}")]
     Common(CommonError),
     #[error("{0}")]
     Config(ConfigError),
@@ -111,6 +117,8 @@ pub enum UploadError {
     Client(#[from] ClientError),
     #[error("Unsupported file extension: {0}")]
     UnsupportedFileExtension(String),
+    #[error("Columnar upload encoding failed: {0}")]
+    Encoding(String),
     #[error("Failed to read file: {0}")]
     FailedToReadFile(std::io::Error),
     #[error("Failed to read file: {0}")]
@@ -121,6 +129,15 @@ pub enum UploadError {
 
     #[error("Failed to upload, status: {0}, message: {1}")]
     UploadFailureStatus(i32, String),
+
+    #[error("Upload interrupted after reading {bytes_read} of {total_bytes} bytes: {details}")]
+    Interrupted {
+        bytes_read: u64,
+        total_bytes: u64,
+        details: String,
+        #[source]
+        source: reqwest::Error,
+    },
 
     #[error("File IO error: {0}")]
     FileIO(#[from] std::io::Error),

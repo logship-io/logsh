@@ -13,9 +13,7 @@ struct ContextInfo {
 
 fn load_context() -> Result<ContextInfo, String> {
     let cfg = logsh_core::config::load().map_err(|e| format!("Config error: {e}"))?;
-    let ctx = cfg
-        .get_current_context()
-        .ok_or_else(|| "No context configured.".to_string())?;
+    let ctx = cfg.resolve_current_context().map_err(|e| e.to_string())?;
     Ok(ContextInfo {
         name: ctx.name.clone(),
         connection: ctx.connection,
@@ -33,6 +31,7 @@ fn authenticated_client() -> Result<AuthenticatedContext, String> {
     let account_id = ctx
         .connection
         .effective_account()
+        .map_err(|e| e.to_string())?
         .ok_or_else(|| "No account selected.".to_string())?;
     let token = ctx
         .connection
@@ -45,6 +44,10 @@ fn authenticated_client() -> Result<AuthenticatedContext, String> {
 /// Requests sent from the UI thread to the backend thread.
 #[derive(Debug)]
 pub enum BackendRequest {
+    ForSession {
+        generation: u64,
+        request: Box<BackendRequest>,
+    },
     ExecuteQuery(String),
     ParseQuery(String),
     LoadSchemas,
@@ -66,6 +69,10 @@ pub enum BackendRequest {
 /// Responses sent from the backend thread to the UI thread.
 #[derive(Debug)]
 pub enum BackendResponse {
+    ForSession {
+        generation: u64,
+        response: Box<BackendResponse>,
+    },
     QueryResult(QueryResults),
     QueryError(String),
     ParseResult(logsh_core::query::ParseResult),
@@ -95,46 +102,60 @@ pub fn spawn_backend(
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         while let Ok(req) = rx.recv() {
+            let (generation, req) = match req {
+                BackendRequest::ForSession {
+                    generation,
+                    request,
+                } => (generation, *request),
+                request => (0, request),
+            };
+            let send = |response| {
+                let _ = tx.send(BackendResponse::ForSession {
+                    generation,
+                    response: Box::new(response),
+                });
+            };
             match req {
+                BackendRequest::ForSession { .. } => unreachable!("Requests cannot be nested"),
                 BackendRequest::Shutdown => break,
                 BackendRequest::ExecuteQuery(query) => {
                     let response = execute_query(&query);
-                    let _ = tx.send(response);
+                    send(response);
                 }
                 BackendRequest::ParseQuery(query) => {
                     let response = parse_query(&query);
-                    let _ = tx.send(response);
+                    send(response);
                 }
                 BackendRequest::LoadSchemas => {
                     let response = load_schemas();
-                    let _ = tx.send(response);
+                    send(response);
                 }
                 BackendRequest::LoadAccounts => {
                     let response = load_accounts();
-                    let _ = tx.send(response);
+                    send(response);
                 }
                 BackendRequest::SelectAccount {
                     account_id,
                     account_name,
                 } => {
                     let response = select_account(account_id, &account_name);
-                    let _ = tx.send(response);
+                    send(response);
                 }
                 BackendRequest::SwitchContext(name) => {
                     let response = switch_context(&name);
-                    let _ = tx.send(response);
+                    send(response);
                 }
                 BackendRequest::LoadSavedQueries => {
                     let response = load_saved_queries();
-                    let _ = tx.send(response);
+                    send(response);
                 }
                 BackendRequest::SaveQuery { name, query } => {
                     let response = save_query(&name, &query);
-                    let _ = tx.send(response);
+                    send(response);
                 }
                 BackendRequest::DeleteSavedQuery(query_id) => {
                     let response = delete_saved_query(query_id);
-                    let _ = tx.send(response);
+                    send(response);
                 }
             }
         }
@@ -147,25 +168,7 @@ fn execute_query(query: &str) -> BackendResponse {
         Err(e) => return BackendResponse::QueryError(e),
     };
 
-    let mut cfg = ctx.cfg;
-    let mut conn = ctx.connection;
-
-    if conn.default_account().is_none() {
-        match conn.accounts(conn.user_id) {
-            Ok(accounts) => {
-                if let Some(first) = accounts.first() {
-                    conn.default_account = Some(first.account_id);
-                    conn.default_account_name = Some(first.account_name.clone());
-                    conn.known_accounts = accounts.iter().map(|a| a.account_name.clone()).collect();
-                    cfg.contexts.insert(ctx.name.clone(), conn.clone());
-                    let _ = logsh_core::config::save(cfg);
-                }
-            }
-            Err(e) => {
-                return BackendResponse::QueryError(format!("Failed to fetch accounts: {e}"));
-            }
-        }
-    }
+    let conn = ctx.connection;
 
     match conn.query_raw(query, None) {
         Ok(json) => {

@@ -8,9 +8,13 @@ use ratatui::{
 use crate::app::COMMANDS;
 
 const KEYBINDINGS: &[(&str, &str)] = &[
+    ("F1", "Browse and search all commands"),
+    ("F2", "Choose an account"),
+    ("F3 / F4", "Choose a context / log in"),
     ("Tab / Shift+Tab", "Cycle focus: Schemas → Editor → Results"),
     ("Alt+Enter / Ctrl+R", "Execute query"),
     ("Ctrl+K", "Open context switcher"),
+    ("Ctrl+A / Ctrl+L", "Add context / log in (context switcher)"),
     ("Ctrl+S", "Open saved queries"),
     ("Alt+Up / Alt+Down", "Navigate query history"),
     (":", "Open command bar"),

@@ -9,13 +9,13 @@ use ratatui::{
 use crate::app::App;
 
 pub fn draw(f: &mut Frame, app: &App) {
-    let area = super::centered_rect(50, 60, f.area());
+    let area = super::centered_rect(85, 60, f.area());
 
     // Clear the overlay area
     f.render_widget(Clear, area);
 
     let block = Block::default()
-        .title(" Contexts (Enter to switch, Esc to close) ")
+        .title(" Contexts: Enter switch, Ctrl+A add, Ctrl+L login ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
 

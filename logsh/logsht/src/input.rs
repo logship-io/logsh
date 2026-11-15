@@ -7,17 +7,24 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
     if matches!(key.code, KeyCode::Char('c') | KeyCode::Char('q'))
         && key.modifiers.contains(KeyModifiers::CONTROL)
     {
+        app.cancel_login();
         app.running = false;
         return;
     }
 
     if key.code == KeyCode::Esc && app.overlay.is_some() {
+        if app.overlay == Some(Overlay::Login) || app.login.pending.is_some() {
+            app.cancel_login();
+            app.status_message = Some("Login cancelled; configuration unchanged.".into());
+        }
         app.overlay = None;
         return;
     }
 
     if let Some(overlay) = &app.overlay.clone() {
         match overlay {
+            Overlay::Commands => crate::views::commands::handle_key(app, key),
+            Overlay::Login => crate::login::handle_key(app, key),
             Overlay::ContextSwitcher => handle_context_key(app, key),
             Overlay::AccountPicker => handle_account_key(app, key),
             Overlay::SavedQueries => handle_saved_query_key(app, key),
@@ -36,6 +43,26 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
             }
         }
         return;
+    }
+
+    match key.code {
+        KeyCode::F(1) => {
+            app.open_commands();
+            return;
+        }
+        KeyCode::F(2) => {
+            app.open_account_picker();
+            return;
+        }
+        KeyCode::F(3) => {
+            app.open_context_picker();
+            return;
+        }
+        KeyCode::F(4) => {
+            app.open_login(false);
+            return;
+        }
+        _ => {}
     }
 
     if app.focus == Focus::CommandBar {
@@ -65,9 +92,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
             return;
         }
         KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            app.load_contexts();
-            app.context_filter.clear();
-            app.overlay = Some(Overlay::ContextSwitcher);
+            app.open_context_picker();
             return;
         }
         KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -165,10 +190,8 @@ fn handle_results_key(app: &mut App, key: KeyEvent) {
             app.results_cursor = 0;
             app.results_col = 0;
         }
-        KeyCode::End | KeyCode::Char('G') => {
-            if row_count > 0 {
-                app.results_cursor = row_count - 1;
-            }
+        KeyCode::End | KeyCode::Char('G') if row_count > 0 => {
+            app.results_cursor = row_count - 1;
         }
         _ => {}
     }
@@ -224,6 +247,23 @@ fn handle_schema_key(app: &mut App, key: KeyEvent) {
 }
 
 fn handle_context_key(app: &mut App, key: KeyEvent) {
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
+        match key.code {
+            KeyCode::Char('a') => {
+                app.open_login(true);
+                return;
+            }
+            KeyCode::Char('l') => {
+                let name = app
+                    .filtered_contexts()
+                    .get(app.context_selected)
+                    .map(|(_, ctx)| ctx.name.clone());
+                app.open_named_login(false, name.as_deref());
+                return;
+            }
+            _ => {}
+        }
+    }
     let filtered = app.filtered_contexts();
     let filtered_len = filtered.len();
 
@@ -390,14 +430,12 @@ fn handle_command_key(app: &mut App, key: KeyEvent) {
                     .unwrap_or(0);
             }
         }
-        KeyCode::Right => {
-            if app.command_cursor < app.command_input.len() {
-                app.command_cursor = app.command_input[app.command_cursor..]
-                    .char_indices()
-                    .nth(1)
-                    .map(|(i, _)| app.command_cursor + i)
-                    .unwrap_or(app.command_input.len());
-            }
+        KeyCode::Right if app.command_cursor < app.command_input.len() => {
+            app.command_cursor = app.command_input[app.command_cursor..]
+                .char_indices()
+                .nth(1)
+                .map(|(i, _)| app.command_cursor + i)
+                .unwrap_or(app.command_input.len());
         }
         _ => {}
     }

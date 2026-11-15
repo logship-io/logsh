@@ -48,7 +48,12 @@ pub struct AddContextArgs {
     pub pat: bool,
     #[arg(short, long, help = "Username (basic auth).")]
     pub username: Option<String>,
-    #[arg(short, long, help = "Password (basic auth). Prompted if omitted.")]
+    #[arg(
+        short,
+        long,
+        conflicts_with = "password_stdin",
+        help = "Password (basic auth). Prompted if omitted."
+    )]
     pub password: Option<String>,
     #[arg(long, help = "Read password from stdin.")]
     pub password_stdin: bool,
@@ -56,6 +61,7 @@ pub struct AddContextArgs {
         short,
         long,
         env = "LOGSH_PAT_TOKEN",
+        conflicts_with = "token_stdin",
         help = "Personal Access Token. Can also be set via LOGSH_PAT_TOKEN."
     )]
     pub token: Option<String>,
@@ -65,6 +71,30 @@ pub struct AddContextArgs {
     pub oauth_flow: OAuthFlow,
     #[arg(long, help = "Don't set this context as the default.")]
     pub no_default: bool,
+}
+
+#[derive(clap::Args)]
+pub struct LoginContextArgs {
+    /// Context name; defaults to the active context.
+    pub name: Option<String>,
+    #[arg(long, help = "Use password authentication with this username")]
+    pub username: Option<String>,
+    #[arg(long, conflicts_with = "password_stdin")]
+    pub password: Option<String>,
+    #[arg(long)]
+    pub password_stdin: bool,
+    #[arg(
+        long,
+        help = "Use Personal Access Token authentication",
+        conflicts_with = "sso"
+    )]
+    pub pat: bool,
+    #[arg(long, conflicts_with = "token_stdin", env = "LOGSH_PAT_TOKEN")]
+    pub token: Option<String>,
+    #[arg(long)]
+    pub token_stdin: bool,
+    #[arg(long, help = "Use OAuth device login")]
+    pub sso: bool,
 }
 
 #[derive(Clone, Copy, Default, ValueEnum)]
@@ -77,13 +107,12 @@ pub enum OAuthFlow {
 #[derive(Subcommand)]
 #[clap(visible_aliases = ["ctx"], about = "Manage logsh contexts (server connections).")]
 pub enum ContextCommand {
+    #[clap(hide = true)]
+    Overview,
     #[clap(about = "Add a new context")]
     Add(AddContextArgs),
     #[clap(about = "Re-authenticate the current or named context")]
-    Login {
-        #[arg(help = "Context name.")]
-        name: Option<String>,
-    },
+    Login(LoginContextArgs),
     #[clap(visible_alias = "ls", about = "List contexts")]
     List,
     #[clap(visible_alias = "rm", about = "Remove a context")]

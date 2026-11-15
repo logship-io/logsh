@@ -11,14 +11,14 @@ pub struct WhoamiCommand {}
 
 pub fn execute_whoami(_command: WhoamiCommand, output: Option<OutputMode>) -> Result<(), Error> {
     let cfg = config::load()?;
-    let conn = cfg.get_current_context();
+    let conn = Some(cfg.resolve_current_context()?);
 
     match conn {
         Some(conn) => match conn.connection.who_am_i() {
             Ok(user) => {
                 let sub = conn
                     .connection
-                    .effective_account()
+                    .effective_account()?
                     .map_or("None".to_string(), |s| s.to_string());
                 match output {
                     Some(OutputMode::Json | OutputMode::JsonPretty) => {
@@ -33,8 +33,8 @@ pub fn execute_whoami(_command: WhoamiCommand, output: Option<OutputMode>) -> Re
                         println!("Status: {}", "Connected".green());
                         println!(
                             "Connection: {}  User: {}  Account: {}",
-                            &conn.name.blue(),
-                            &user.user_name.blue(),
+                            conn.name.blue(),
+                            user.user_name.blue(),
                             sub.blue()
                         );
                     }

@@ -27,18 +27,28 @@ fn get_clean_path(path: &str) -> &str {
 }
 
 fn map_api_error(response: reqwest::blocking::Response) -> error::ClientError {
-    let error = response.json::<ApiErrorModel>().unwrap_or(ApiErrorModel {
-        message: "Unknown".to_string(),
-        stack_trace: None,
-        errors: vec![],
-    });
-    error::ClientError::Common(error::CommonError::ApiError(error))
+    let status = response.status().as_u16();
+    let body = response.text().unwrap_or_default();
+    let message = serde_json::from_str::<ApiErrorModel>(&body)
+        .map(|e| e.message)
+        .unwrap_or_else(|_| {
+            if body.trim().is_empty() {
+                reqwest::StatusCode::from_u16(status)
+                    .ok()
+                    .and_then(|s| s.canonical_reason())
+                    .unwrap_or("Request failed")
+                    .to_owned()
+            } else {
+                body
+            }
+        });
+    error::ClientError::Http { status, message }
 }
 
 impl LogshClient {
     pub fn new(server: &str, token: String) -> Self {
         Self {
-            server: server.trim().to_string(),
+            server: server.trim().trim_end_matches('/').to_string(),
             token: token.trim().to_string(),
         }
     }
@@ -52,11 +62,6 @@ impl LogshClient {
         let url = format!("{}/{}", self.server, path_clean);
         log::debug!("[{method}] {url}");
         let client = reqwest::blocking::Client::new();
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert(
-            "Authorization",
-            format!("Bearer {}", self.token).parse().unwrap(),
-        );
         let builder = match method {
             "GET" => client.get(&url),
             "POST" => client.post(&url),
@@ -64,7 +69,7 @@ impl LogshClient {
             "DELETE" => client.delete(&url),
             _ => unreachable!(),
         };
-        (client, builder.headers(headers))
+        (client, builder.bearer_auth(&self.token))
     }
 
     pub fn get_json<TResult: for<'de> serde::Deserialize<'de>>(
@@ -116,6 +121,29 @@ impl LogshClient {
         }
         Ok(())
     }
+
+    /// JSON request supporting both JSON results and empty successful responses.
+    pub fn send_json<T: serde::Serialize>(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&T>,
+    ) -> Result<serde_json::Value, error::ClientError> {
+        let (_, mut req) = self.request(method, path);
+        if let Some(body) = body {
+            req = req.json(body);
+        }
+        let response = req.send()?;
+        if !response.status().is_success() {
+            return Err(map_api_error(response));
+        }
+        let text = response.text()?;
+        if text.trim().is_empty() {
+            return Ok(serde_json::Value::Null);
+        }
+        serde_json::from_str(&text)
+            .map_err(|e| error::ClientError::Common(error::CommonError::Json(e)))
+    }
 }
 
 impl Default for LogshClientHandler {
@@ -141,11 +169,7 @@ impl LogshClientHandler {
                 .get(name)
                 .ok_or(error::ClientError::ConnectionNotFound(name.to_string()))?
                 .clone(),
-            None => default_config
-                .get_current_context()
-                .ok_or(error::ConfigError::NoDefaultConnection)?
-                .connection
-                .clone(),
+            None => default_config.resolve_current_context()?.connection.clone(),
         };
         Ok(connection)
     }

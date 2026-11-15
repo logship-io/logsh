@@ -3,10 +3,7 @@ use std::io::Write;
 use anyhow::{anyhow, Error};
 use clap::Subcommand;
 use colored::Colorize;
-use logsh_core::{
-    config,
-    error::{ConfigError, ConnectError},
-};
+use logsh_core::config;
 use term_table::{
     row::Row,
     table_cell::{Alignment, TableCell},
@@ -16,11 +13,31 @@ use term_table::{
 use crate::OutputMode;
 
 #[derive(Debug, Subcommand)]
-#[clap(about = "Inspect schemas and tables on the connected server.")]
+#[clap(about = "Inspect and manage schemas and tables on the connected server.")]
 pub enum SchemaCommand {
     /// List all tables in the current account.
     #[clap(visible_alias = "ls")]
     List,
+
+    /// Create a table or merge declared columns; other columns remain inferred.
+    #[clap(visible_alias = "create")]
+    Define {
+        table: String,
+        /// Column declaration NAME:TYPE; repeat for multiple columns.
+        #[arg(long = "column", required = true, value_parser = parse_column)]
+        columns: Vec<ColumnDefinition>,
+    },
+
+    /// Add a declared column (creates the table if it does not exist).
+    AddColumn {
+        table: String,
+        column: String,
+        column_type: String,
+    },
+
+    /// Remove a column from the catalog; ingestion may infer it again.
+    #[clap(visible_alias = "remove-column")]
+    DropColumn { table: String, column: String },
 
     /// Describe columns in a specific table.
     Describe {
@@ -37,14 +54,21 @@ pub fn execute_schema<W: Write>(
     match command {
         SchemaCommand::List => list_tables(output, write),
         SchemaCommand::Describe { table } => describe_table(&table, output, write),
+        command => {
+            let query = management_query(command)?;
+            crate::query::execute_query_text(
+                &query,
+                Some(std::time::Duration::from_secs(60)),
+                output,
+                write,
+            )
+        }
     }
 }
 
 fn list_tables<W: Write>(output: Option<OutputMode>, mut write: W) -> Result<(), Error> {
     let cfg = config::load()?;
-    let ctx = cfg
-        .get_current_context()
-        .ok_or(ConnectError::Config(ConfigError::NoDefaultConnection))?;
+    let ctx = cfg.resolve_current_context()?;
 
     let r = ctx
         .connection
@@ -116,9 +140,7 @@ fn describe_table<W: Write>(
     mut write: W,
 ) -> Result<(), Error> {
     let cfg = config::load()?;
-    let ctx = cfg
-        .get_current_context()
-        .ok_or(ConnectError::Config(ConfigError::NoDefaultConnection))?;
+    let ctx = cfg.resolve_current_context()?;
 
     let r = ctx
         .connection
@@ -228,4 +250,93 @@ fn describe_table<W: Write>(
         }
     }
     Ok(())
+}
+
+// Backend identifiers cannot contain quotes or command delimiters.
+fn identifier(value: &str) -> Result<&str, Error> {
+    if value.is_empty()
+        || value.encode_utf16().count() > 255
+        || !value
+            .chars()
+            .all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '.'))
+    {
+        return Err(anyhow!(
+            "Names must contain 1–255 letters, digits, dots, underscores, or hyphens"
+        ));
+    }
+    Ok(value)
+}
+
+#[derive(Debug, Clone)]
+pub struct ColumnDefinition {
+    name: String,
+    column_type: String,
+}
+
+fn parse_column(value: &str) -> Result<ColumnDefinition, String> {
+    let (name, typ) = value.split_once(':').ok_or("Expected NAME:TYPE")?;
+    identifier(name).map_err(|e| e.to_string())?;
+    if typ.is_empty() || !typ.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return Err("Expected a column type name".into());
+    }
+    Ok(ColumnDefinition {
+        name: name.to_owned(),
+        column_type: typ.to_owned(),
+    })
+}
+
+fn management_query(command: SchemaCommand) -> Result<String, Error> {
+    match command {
+        SchemaCommand::Define { table, columns } => {
+            identifier(&table)?;
+            let columns = columns
+                .iter()
+                .map(|c| format!("'{}':{}", c.name, c.column_type))
+                .collect::<Vec<_>>();
+            if columns.is_empty() {
+                return Err(anyhow!("At least one column is required"));
+            }
+            Ok(format!(
+                ".create-merge table '{table}' ({})",
+                columns.join(", ")
+            ))
+        }
+        SchemaCommand::AddColumn {
+            table,
+            column,
+            column_type,
+        } => management_query(SchemaCommand::Define {
+            table,
+            columns: vec![parse_column(&format!("{column}:{column_type}")).map_err(|e| anyhow!(e))?],
+        }),
+        SchemaCommand::DropColumn { table, column } => {
+            identifier(&table)?;
+            identifier(&column)?;
+            Ok(format!(".drop column '{table}'.'{column}'"))
+        }
+        _ => Err(anyhow!("Expected a schema management command")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn management_names_cannot_inject_commands() {
+        for name in ["", "logs'; .drop table 'other", "logs\nother", "logs;other"] {
+            assert!(management_query(SchemaCommand::DropColumn {
+                table: name.into(),
+                column: "field".into()
+            })
+            .is_err());
+        }
+        for column in [
+            "message:string); .drop table 'logs'",
+            "field:",
+            "field",
+            ":string",
+        ] {
+            assert!(parse_column(column).is_err());
+        }
+    }
 }

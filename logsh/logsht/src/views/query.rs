@@ -24,7 +24,7 @@ pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
         .constraints([
             Constraint::Min(4),                     // main panes
             Constraint::Length(command_bar_height), // command bar
-            Constraint::Length(1),                  // status/key hints
+            Constraint::Length(2),                  // identity and always-visible controls
         ])
         .split(area);
 
@@ -329,11 +329,7 @@ fn draw_results(f: &mut Frame, app: &mut App, area: Rect) {
 
     // Build column widths: all columns equal, focused column gets up to 50%
     let available = chunks[0].width.saturating_sub(2) as usize; // minus borders
-    let base_width = if col_count > 0 {
-        available / col_count
-    } else {
-        10
-    };
+    let base_width = available.checked_div(col_count).unwrap_or(10);
     let max_focused = available / 2;
     let focused_width = base_width.max(20).min(max_focused) as u16;
     let other_width = if col_count > 1 {
@@ -466,8 +462,6 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
         Focus::CommandBar => "command",
     };
 
-    let hints = " :cmd  Tab ↹  ^R run  ^K ctx  ^S saved  ? help  ^Q quit";
-
     let left = Span::styled(
         format!(" {ctx_name} "),
         Style::default().fg(Color::Black).bg(Color::Cyan),
@@ -480,7 +474,6 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
         format!(" {focus_label} "),
         Style::default().fg(Color::Black).bg(Color::DarkGray),
     );
-    let right = Span::styled(hints, Style::default().fg(Color::DarkGray));
 
     let line = Line::from(vec![
         left,
@@ -489,7 +482,21 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
         Span::raw(" "),
         mid,
         Span::raw(" "),
-        right,
     ]);
-    f.render_widget(Paragraph::new(line), area);
+    let rows = Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).split(area);
+    f.render_widget(Paragraph::new(line), rows[0]);
+    let actions = Line::from(vec![
+        Span::styled(
+            " F1 Commands  F2 Account  ",
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            "F3 Context  F4 Login  Ctrl+R Run  Ctrl+Q Quit",
+            Style::default().fg(Color::White),
+        ),
+    ]);
+    f.render_widget(Paragraph::new(actions), rows[1]);
 }

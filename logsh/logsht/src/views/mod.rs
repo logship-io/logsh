@@ -2,6 +2,7 @@ use ratatui::layout::{Constraint, Layout, Rect};
 
 pub mod account;
 pub mod cell_detail;
+pub mod commands;
 pub mod context;
 pub mod help;
 pub mod query;

@@ -21,13 +21,13 @@ jobs:
           workspaces: logsh
           cache-all-crates: true
       - name: Check formatting
-        run: cargo fmt -- --check
+        run: cargo fmt --all -- --check
         working-directory: ./logsh
       - name: Clippy
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
         working-directory: ./logsh
       - name: Tests
-        run: cargo test
+        run: cargo test --workspace
         working-directory: ./logsh
 
   build:

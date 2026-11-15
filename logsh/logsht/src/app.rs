@@ -8,6 +8,8 @@ use crate::backend::{BackendRequest, BackendResponse};
 /// Which modal overlay is active, if any.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Overlay {
+    Commands,
+    Login,
     ContextSwitcher,
     AccountPicker,
     SavedQueries,
@@ -76,6 +78,14 @@ pub struct Command {
 
 pub const COMMANDS: &[Command] = &[
     Command {
+        name: "login",
+        description: "Log in to the current context",
+    },
+    Command {
+        name: "context add",
+        description: "Connect to a new server",
+    },
+    Command {
         name: "quit",
         description: "Exit logsht",
     },
@@ -131,6 +141,9 @@ pub const COMMANDS: &[Command] = &[
 
 /// Top-level application state.
 pub struct App {
+    pub command_selected: usize,
+    pub backend_generation: u64,
+    pub login: crate::login::LoginForm,
     pub running: bool,
     pub overlay: Option<Overlay>,
     pub focus: Focus,
@@ -203,6 +216,9 @@ impl App {
     pub fn new(backend_tx: mpsc::Sender<BackendRequest>) -> Self {
         let editor = TextArea::default();
         Self {
+            command_selected: 0,
+            login: crate::login::LoginForm::default(),
+            backend_generation: 0,
             running: true,
             overlay: None,
             focus: Focus::Schemas,
@@ -256,8 +272,7 @@ impl App {
 
         if self.current_context.is_none() {
             if self.contexts.is_empty() {
-                self.error_message =
-                    Some("No contexts configured. Run `logsh ctx add <server>` first.".to_string());
+                self.open_login(true);
             } else {
                 self.status_message =
                     Some("Welcome to logsht. Select a context to begin.".to_string());
@@ -268,11 +283,15 @@ impl App {
 
         if let Ok(cfg) = logsh_core::config::load() {
             if let Some(ctx) = cfg.get_current_context() {
+                if ctx.connection.get_token().is_none() {
+                    self.open_login(false);
+                    return;
+                }
                 self.current_account = ctx.connection.default_account_name.clone();
                 if ctx.connection.default_account().is_none() {
                     self.status_message = Some("Select an account to continue.".to_string());
                     // Need to fetch accounts and let user pick
-                    let _ = self.backend_tx.send(BackendRequest::LoadAccounts);
+                    let _ = self.send_backend(BackendRequest::LoadAccounts);
                 } else {
                     self.load_schemas();
                 }
@@ -282,6 +301,10 @@ impl App {
 
     /// Called on each tick (~50ms) to handle debounced parse requests.
     pub fn tick(&mut self) {
+        self.poll_login();
+        if self.overlay == Some(Overlay::Login) || self.login.pending.is_some() {
+            return;
+        }
         self.tick_count += 1;
 
         let query_text = self.editor_text();
@@ -294,7 +317,7 @@ impl App {
         {
             self.parse_dirty = false;
             self.parse_in_flight = true;
-            let _ = self.backend_tx.send(BackendRequest::ParseQuery(query_text));
+            let _ = self.send_backend(BackendRequest::ParseQuery(query_text));
         }
     }
 
@@ -414,7 +437,14 @@ impl App {
     }
 
     pub fn select_account(&mut self, id: uuid::Uuid, name: &str) {
-        let _ = self.backend_tx.send(BackendRequest::SelectAccount {
+        self.invalidate_backend();
+        if let Some(connection) = self.login.pending.as_mut() {
+            connection.default_account = Some(id);
+            connection.default_account_name = Some(name.to_owned());
+            self.finish_login();
+            return;
+        }
+        let _ = self.send_backend(BackendRequest::SelectAccount {
             account_id: id,
             account_name: name.to_string(),
         });
@@ -422,11 +452,7 @@ impl App {
 
     pub fn load_contexts(&mut self) {
         if let Ok(cfg) = logsh_core::config::load() {
-            self.current_context = if cfg.current_context.is_empty() {
-                None
-            } else {
-                Some(cfg.current_context.clone())
-            };
+            self.current_context = cfg.get_current_context().map(|context| context.name);
             let mut entries: Vec<_> = cfg
                 .contexts
                 .iter()
@@ -452,18 +478,18 @@ impl App {
 
         self.query_running = true;
         self.error_message = None;
-        let _ = self.backend_tx.send(BackendRequest::ExecuteQuery(query));
+        let _ = self.send_backend(BackendRequest::ExecuteQuery(query));
     }
 
     pub fn load_schemas(&mut self) {
         self.schemas_loading = true;
         self.schemas.clear();
-        let _ = self.backend_tx.send(BackendRequest::LoadSchemas);
+        let _ = self.send_backend(BackendRequest::LoadSchemas);
     }
 
     pub fn load_saved_queries(&mut self) {
         self.saved_queries_loading = true;
-        let _ = self.backend_tx.send(BackendRequest::LoadSavedQueries);
+        let _ = self.send_backend(BackendRequest::LoadSavedQueries);
     }
 
     pub fn save_current_query(&mut self, name: &str) {
@@ -472,22 +498,19 @@ impl App {
             self.error_message = Some("Cannot save empty query.".to_string());
             return;
         }
-        let _ = self.backend_tx.send(BackendRequest::SaveQuery {
+        let _ = self.send_backend(BackendRequest::SaveQuery {
             name: name.to_string(),
             query,
         });
     }
 
     pub fn delete_saved_query(&mut self, query_id: uuid::Uuid) {
-        let _ = self
-            .backend_tx
-            .send(BackendRequest::DeleteSavedQuery(query_id));
+        let _ = self.send_backend(BackendRequest::DeleteSavedQuery(query_id));
     }
 
     pub fn switch_context(&mut self, name: &str) {
-        let _ = self
-            .backend_tx
-            .send(BackendRequest::SwitchContext(name.to_string()));
+        self.invalidate_backend();
+        let _ = self.send_backend(BackendRequest::SwitchContext(name.to_string()));
     }
 
     pub fn open_command_bar(&mut self) {
@@ -497,10 +520,57 @@ impl App {
         self.focus = Focus::CommandBar;
     }
 
+    pub fn open_commands(&mut self) {
+        self.command_input.clear();
+        self.command_cursor = 0;
+        self.command_selected = 0;
+        if self.focus != Focus::CommandBar {
+            self.pre_command_focus = self.focus;
+        }
+        self.overlay = Some(Overlay::Commands);
+    }
+
+    pub fn run_selected_command(&mut self) {
+        let Some(command) = self
+            .palette_commands()
+            .get(self.command_selected)
+            .map(|command| command.name)
+        else {
+            return;
+        };
+        self.overlay = None;
+        if command == "save" {
+            self.command_input = "save ".into();
+            self.command_cursor = self.command_input.len();
+            self.focus = Focus::CommandBar;
+        } else {
+            self.command_input = command.into();
+            self.execute_command();
+        }
+    }
+
+    pub fn open_account_picker(&mut self) {
+        self.account_filter.clear();
+        self.account_selected = 0;
+        self.accounts.clear();
+        self.overlay = Some(Overlay::AccountPicker);
+        self.status_message = Some("Loading accounts...".into());
+        let _ = self.send_backend(BackendRequest::LoadAccounts);
+    }
+
+    pub fn open_context_picker(&mut self) {
+        self.load_contexts();
+        self.context_filter.clear();
+        self.context_selected = 0;
+        self.overlay = Some(Overlay::ContextSwitcher);
+    }
+
     pub fn execute_command(&mut self) {
         let cmd = self.command_input.trim().to_lowercase();
         self.focus = self.pre_command_focus;
         match cmd.as_str() {
+            "login" => self.open_login(false),
+            "context add" | "ctx add" => self.open_login(true),
             "q" | "quit" | "exit" => self.running = false,
             "refresh" | "r" => self.load_schemas(),
             "clear" | "c" => {
@@ -509,16 +579,13 @@ impl App {
                 self.error_message = None;
             }
             "ctx" | "contexts" => {
-                self.load_contexts();
-                self.context_filter.clear();
-                self.overlay = Some(Overlay::ContextSwitcher);
+                self.open_context_picker();
             }
             "help" | "h" | "?" => {
                 self.overlay = Some(Overlay::Help);
             }
             "account" | "acct" | "a" => {
-                self.account_filter.clear();
-                let _ = self.backend_tx.send(BackendRequest::LoadAccounts);
+                self.open_account_picker();
             }
             "schemas" | "s" => {
                 self.schema_nav_visible = !self.schema_nav_visible;
@@ -592,6 +659,17 @@ impl App {
         COMMANDS
             .iter()
             .filter(|c| c.name.starts_with(&input))
+            .collect()
+    }
+
+    pub fn palette_commands(&self) -> Vec<&Command> {
+        let filter = self.command_input.trim().to_lowercase();
+        COMMANDS
+            .iter()
+            .filter(|command| {
+                command.name.contains(&filter)
+                    || command.description.to_lowercase().contains(&filter)
+            })
             .collect()
     }
 
@@ -735,8 +813,67 @@ impl App {
         }
     }
 
+    pub fn send_backend(
+        &self,
+        request: BackendRequest,
+    ) -> Result<(), mpsc::SendError<BackendRequest>> {
+        self.backend_tx.send(BackendRequest::ForSession {
+            generation: self.backend_generation,
+            request: Box::new(request),
+        })
+    }
+    pub fn invalidate_backend(&mut self) {
+        self.backend_generation = self.backend_generation.wrapping_add(1);
+        self.parse_in_flight = false;
+        self.query_running = false;
+        self.schemas_loading = false;
+        self.saved_queries_loading = false;
+    }
+
+    pub fn clear_account_data(&mut self) {
+        self.results = None;
+        self.schemas.clear();
+        self.schema_columns.clear();
+        self.saved_queries.clear();
+        self.current_account = None;
+        self.parse_result = None;
+        self.parse_error = None;
+        self.parse_dirty = false;
+    }
     pub fn handle_backend_response(&mut self, response: BackendResponse) {
+        let response = match response {
+            BackendResponse::ForSession {
+                generation,
+                response,
+            } => {
+                if generation != self.backend_generation {
+                    return;
+                }
+                *response
+            }
+            response => response,
+        };
+        if self.overlay == Some(Overlay::Login) || self.login.pending.is_some() {
+            return;
+        }
+        let auth_error = match &response {
+            BackendResponse::QueryError(msg)
+            | BackendResponse::SchemaError(msg)
+            | BackendResponse::AccountsError(msg)
+            | BackendResponse::SavedQueriesError(msg) => {
+                msg.contains("401") || msg.contains("Not authenticated") || msg.contains("No token")
+            }
+            _ => false,
+        };
+        if auth_error {
+            self.query_running = false;
+            self.schemas_loading = false;
+            self.open_login(false);
+            self.login.message = "Authentication expired. Log in to continue.".into();
+            return;
+        }
         match response {
+            BackendResponse::ForSession { .. } => unreachable!("Responses cannot be nested"),
             BackendResponse::QueryResult(results) => {
                 self.query_running = false;
                 self.results = Some(results);
@@ -770,6 +907,7 @@ impl App {
                 self.error_message = Some(msg);
             }
             BackendResponse::ContextSwitched => {
+                self.clear_account_data();
                 self.load_contexts();
                 self.overlay = None;
                 self.status_message = None;
@@ -782,10 +920,14 @@ impl App {
                 if let Ok(cfg) = logsh_core::config::load() {
                     if let Some(ctx) = cfg.get_current_context() {
                         self.current_account = ctx.connection.default_account_name.clone();
+                        if ctx.connection.get_token().is_none() {
+                            self.open_login(false);
+                            return;
+                        }
                         if ctx.connection.default_account().is_none() {
                             self.status_message =
                                 Some("Select an account to continue.".to_string());
-                            let _ = self.backend_tx.send(BackendRequest::LoadAccounts);
+                            let _ = self.send_backend(BackendRequest::LoadAccounts);
                             return;
                         }
                     }
@@ -803,6 +945,7 @@ impl App {
                 }
             }
             BackendResponse::Accounts(accounts) => {
+                self.status_message = None;
                 let current_id = logsh_core::config::load()
                     .ok()
                     .and_then(|cfg| cfg.get_current_context())
@@ -818,11 +961,7 @@ impl App {
                     .collect();
                 self.account_selected = 0;
 
-                if self.accounts.len() == 1 {
-                    // Auto-select the only account
-                    let a = &self.accounts[0];
-                    self.select_account(a.id, &a.name.clone());
-                } else if self.accounts.is_empty() {
+                if self.accounts.is_empty() {
                     self.error_message = Some("No accounts available.".to_string());
                 } else {
                     self.account_filter.clear();
@@ -830,9 +969,12 @@ impl App {
                 }
             }
             BackendResponse::AccountsError(msg) => {
+                self.status_message = None;
+                self.overlay = None;
                 self.error_message = Some(msg);
             }
             BackendResponse::AccountSelected => {
+                self.clear_account_data();
                 self.overlay = None;
                 self.status_message = None;
                 self.account_filter.clear();
