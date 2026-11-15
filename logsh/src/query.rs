@@ -69,11 +69,9 @@ pub struct QueryCommand {
 pub fn execute_query<W: Write>(
     command: QueryCommand,
     output: Option<OutputMode>,
-    mut write: W,
+    write: W,
 ) -> Result<(), Error> {
     log::debug!("Entering query execution: {:?}", command);
-    let start = Instant::now();
-
     let query = if let Some(q) = command.query {
         q
     } else if let Some(path) = command.file {
@@ -87,19 +85,29 @@ pub fn execute_query<W: Write>(
         s
     };
 
+    execute_query_text(&query, command.timeout.into(), output, write)
+}
+
+pub(crate) fn execute_query_text<W: Write>(
+    query: &str,
+    timeout: Option<std::time::Duration>,
+    output: Option<OutputMode>,
+    mut write: W,
+) -> Result<(), Error> {
+    let start = Instant::now();
     let cfg = config::load()?;
     let connection: config::ContextConfig = cfg.resolve_current_context()?;
-    log::info!("Starting query. Timeout = {}", command.timeout);
+    log::debug!("Starting query. Timeout = {timeout:?}");
     let r = connection
         .connection
-        .query_raw(&query, command.timeout.into())
+        .query_raw(query, timeout)
         .inspect_err(|err| {
-            crate::fmt::print_query_error(&cfg, &query, err);
+            crate::fmt::print_query_error(&cfg, query, err);
         })?;
 
     log::debug!("Response text: {r:?}");
     let result = logsh_core::query::result(&r).inspect_err(|err| {
-        crate::fmt::print_query_error(&cfg, &query, err);
+        crate::fmt::print_query_error(&cfg, query, err);
     })?;
     let query_duration = start.elapsed();
     let render_start = Instant::now();

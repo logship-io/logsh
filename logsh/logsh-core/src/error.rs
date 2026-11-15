@@ -117,6 +117,8 @@ pub enum UploadError {
     Client(#[from] ClientError),
     #[error("Unsupported file extension: {0}")]
     UnsupportedFileExtension(String),
+    #[error("Columnar upload encoding failed: {0}")]
+    Encoding(String),
     #[error("Failed to read file: {0}")]
     FailedToReadFile(std::io::Error),
     #[error("Failed to read file: {0}")]

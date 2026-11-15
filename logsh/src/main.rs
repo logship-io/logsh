@@ -237,7 +237,7 @@ enum Commands {
     /// Execute a Kusto query against a Logship server.
     Query(crate::query::QueryCommand),
 
-    /// Inspect schemas and tables on the connected server.
+    /// Inspect and manage schemas and tables on the connected server.
     #[command(subcommand)]
     Schema(crate::schema::SchemaCommand),
 

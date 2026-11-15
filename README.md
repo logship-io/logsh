@@ -128,7 +128,11 @@ logsh upload my_schema data.csv
 logsh upload my_schema data.tsv --progress
 ```
 
-### Schema Inspection
+Uploads negotiate a streaming columnar format by default. The client preserves CSV/TSV parsing and null semantics, encodes numeric and boolean columns directly, and dictionary-encodes repeated strings when smaller. Encoding uses bounded reusable buffers and overlaps parsing, encoding and network transfer. Auto mode samples encoded columns before uploading and enables gzip when it saves at least 40% of bytes; low-gain data uses uncompressed columnar transport to avoid compression CPU cost.
+
+Use `--encoding raw` to send the original CSV/TSV, or `--encoding columnar` to require the compact protocol with gzip. The default `--encoding auto` falls back to raw for servers without encoding support. Sampling is bounded and rewinds the input; no retry or fallback occurs after uploading begins. `--progress` reports source and wire bytes; JSON output includes `encoding` (`raw`, `columnar-v1`, or `columnar-v1+gzip`), `sourceBytes`, and `wireBytes`.
+
+### Schema Inspection and Management
 
 ```bash
 # List all tables
@@ -136,7 +140,19 @@ logsh schema ls
 
 # Describe columns in a table
 logsh schema describe MyTable
+
+# Create a table or merge declared columns into its existing definition
+logsh schema define MyTable --column message:string --column count:Int64
+logsh schema add-column MyTable screenshot BlobReference
+
+# Remove a column declaration (incoming data can infer it again)
+logsh schema drop-column MyTable legacyField
 ```
+
+Schema changes require a token with **Account management** enabled for the selected
+account and current account/global administrator access. Query-only tokens can use
+`.show tables` and `.show table 'MyTable'` for tables they can read. Existing
+`logsh query -q` commands also accept table management Kusto commands.
 
 ### Accounts
 

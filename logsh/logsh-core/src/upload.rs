@@ -20,6 +20,24 @@ use http_body::{Body, Frame, SizeHint};
 use serde_json::Value;
 use tokio::io::{AsyncRead, ReadBuf};
 
+mod columnar;
+
+/// Raw preserves the library's existing default. The CLI explicitly selects Auto.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum UploadEncoding {
+    #[default]
+    Raw,
+    Auto,
+    Columnar,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct UploadStats {
+    pub source_bytes: u64,
+    pub wire_bytes: u64,
+    pub encoding: &'static str,
+}
+
 struct UploadBody {
     file: tokio::fs::File,
     buffer: Box<[u8; 65536]>,
@@ -130,12 +148,13 @@ pub fn execute(
 }
 
 /// CSV/TSV upload settings. Null markers are opt-in and matched by the server
-/// after unquoting fields; file contents are streamed unchanged.
+/// after unquoting fields; raw and columnar transports preserve those semantics.
 #[derive(Default)]
 pub struct UploadOptions<'a> {
     pub timeout: Option<std::time::Duration>,
     pub pretty_progress: bool,
     pub null_values: &'a [String],
+    pub encoding: UploadEncoding,
 }
 
 impl UploadOptions<'_> {
@@ -145,6 +164,16 @@ impl UploadOptions<'_> {
         path_str: &str,
         connection: &Connection,
     ) -> Result<(), UploadError> {
+        self.execute_with_stats(schema_str, path_str, connection)
+            .map(|_| ())
+    }
+
+    pub fn execute_with_stats(
+        &self,
+        schema_str: &str,
+        path_str: &str,
+        connection: &Connection,
+    ) -> Result<UploadStats, UploadError> {
         let timeout = self.timeout;
         let pretty_progress = self.pretty_progress;
         if path_str.trim().is_empty() {
@@ -183,46 +212,80 @@ impl UploadOptions<'_> {
                 builder = builder.timeout(timeout);
             }
             let client = builder.build()?;
+            let capabilities = if self.encoding == UploadEncoding::Raw { None } else {
+                let mut probe = client.get(format!("{}/inflow/{}/{}/encoding", connection.server.trim_end_matches('/'), account, schema_str));
+                if let Some(token) = connection.get_token() { probe = probe.bearer_auth(token); }
+                let response = probe.send().await?;
+                let unsupported = matches!(response.status().as_u16(), 404 | 405 | 501);
+                if !unsupported && !response.status().is_success() { return Err(map_upload_error(response).await); }
+                let caps = if unsupported { None } else { response.json::<columnar::Capabilities>().await.ok().filter(columnar::Capabilities::supported) };
+                if caps.is_none() && self.encoding == UploadEncoding::Columnar {
+                    return Err(UploadError::Encoding("Server does not advertise columnar v1 support".into()));
+                }
+                caps
+            };
+            let compact = capabilities.is_some();
             let mut request = client.post(format!(
                 "{}/inflow/{}/{}/{}",
-                connection.server.trim_end_matches('/'), account, schema_str, ext
+                connection.server.trim_end_matches('/'), account, schema_str, if compact { "columnar" } else { &ext }
             ));
             if let Some(token) = connection.get_token() {
                 request = request.bearer_auth(token);
             }
-            let body = UploadBody {
-                file: tokio::fs::File::from_std(file),
-                buffer: Box::new([0; 65536]),
-                sent: Arc::clone(&sent),
-                total: file_size,
-                remaining: file_size,
-                last_percent: 0,
-                pretty: pretty_progress,
+            let (body, transfer, compressed) = if let Some(caps) = capabilities {
+                let (body, transfer, compressed) = columnar::body(file, if ext == "tsv" { b'\t' } else { b',' }, caps,
+                    self.null_values.to_vec(), Arc::clone(&sent), file_size, pretty_progress, self.encoding == UploadEncoding::Auto)?;
+                if compressed { request = request.header(reqwest::header::CONTENT_ENCODING, "gzip"); }
+                (reqwest::Body::wrap(body), Some(transfer), compressed)
+            } else {
+                request = request.header(reqwest::header::CONTENT_LENGTH, file_size);
+                let body = UploadBody {
+                    file: tokio::fs::File::from_std(file), buffer: Box::new([0; 65536]), sent: Arc::clone(&sent), total: file_size,
+                    remaining: file_size, last_percent: 0, pretty: pretty_progress,
+                };
+                (reqwest::Body::wrap(body), None, false)
             };
             let mut request = request
-                .header(reqwest::header::CONTENT_TYPE, content_type)
-                .header(reqwest::header::CONTENT_LENGTH, file_size)
-                .body(reqwest::Body::wrap(body))
+                .header(reqwest::header::CONTENT_TYPE, if compact { "application/vnd.logship.columnar.v1" } else { content_type })
+                .body(body)
                 .build()?;
             for value in self.null_values {
                 request.url_mut().query_pairs_mut().append_pair("nullValue", value);
             }
-            let response = client.execute(request).await.map_err(|source| UploadError::Interrupted {
+            let response = client.execute(request).await.map_err(|source| {
+                if let Some(transfer) = &transfer {
+                    transfer.cancel();
+                    if let Some(error) = transfer.error() { return UploadError::Encoding(error); }
+                }
+                UploadError::Interrupted {
                 bytes_read: sent.load(Ordering::Relaxed),
                 total_bytes: file_size,
                 details: error_details(&source),
                 source,
+                }
             })?;
             if !response.status().is_success() {
-                return Err(map_upload_error(response).await);
+                let local_error = transfer.as_ref().and_then(|transfer| { transfer.cancel(); transfer.error() });
+                let mut error = map_upload_error(response).await;
+                if let (UploadError::UploadFailureStatus(400, message), Some(local)) = (&mut error, local_error) {
+                    message.push_str("; client encoding error: "); message.push_str(&local);
+                }
+                return Err(error);
             }
-            if sent.load(Ordering::Relaxed) != file_size {
+            if sent.load(Ordering::Relaxed) != file_size || transfer.as_ref().is_some_and(|transfer| !transfer.finished()) {
+                if let Some(transfer) = &transfer { transfer.cancel(); }
                 return Err(UploadError::Common(CommonError::IOError(std::io::Error::new(
                     std::io::ErrorKind::UnexpectedEof,
                     format!("Server returned success before the complete file was read ({} of {file_size} bytes); ingestion may be partial.", sent.load(Ordering::Relaxed)),
                 ))));
             }
-            Ok(())
+            if pretty_progress {
+                if let Some(transfer) = &transfer {
+                    eprintln!("\nColumnar{}: {file_size} source bytes, {} wire bytes", if compressed { " gzip" } else { "" }, transfer.wire_bytes.load(Ordering::Relaxed));
+                }
+            }
+            Ok(UploadStats { source_bytes: file_size, wire_bytes: transfer.as_ref().map_or(file_size, |transfer| transfer.wire_bytes.load(Ordering::Relaxed)),
+                encoding: if compressed { "columnar-v1+gzip" } else if compact { "columnar-v1" } else { "raw" } })
         });
         if pretty_progress {
             eprintln!();

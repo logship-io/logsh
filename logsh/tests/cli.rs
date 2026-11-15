@@ -296,3 +296,67 @@ fn full_help_does_not_print_environment_token_values() {
     assert!(!stdout(&result).contains("sensitive-token-value"));
     assert!(stdout(&result).contains("LOGSH_PAT_TOKEN"));
 }
+
+#[test]
+fn schema_management_commands_use_selected_account_and_return_json() {
+    for (args, query) in [
+        (
+            vec![
+                "schema",
+                "define",
+                "app.logs",
+                "--column",
+                "message:string",
+                "--column",
+                "count:Int64",
+            ],
+            ".create-merge table 'app.logs' ('message':string, 'count':Int64)",
+        ),
+        (
+            vec!["schema", "add-column", "app.logs", "newField", "Boolean"],
+            ".create-merge table 'app.logs' ('newField':Boolean)",
+        ),
+        (
+            vec!["schema", "drop-column", "app.logs", "legacy"],
+            ".drop column 'app.logs'.'legacy'",
+        ),
+    ] {
+        let server = Server::new(vec![request(
+            "POST",
+            format!("/search/{ACCOUNT}/kusto"),
+            Some(json!({"query":query,"variables":[]})),
+            json!({"header":[],"results":[],"messages":[{"message":"Done"}]}),
+        )]);
+        let cfg = Config::new();
+        cfg.write(&server.url, Some(ACCOUNT));
+        let mut args = args;
+        args.extend(["-o", "json"]);
+        let result = cfg.run(&args);
+        assert!(result.status.success(), "{}", stderr(&result));
+        let value: Value = serde_json::from_slice(&result.stdout).unwrap();
+        assert_eq!(value["messages"][0]["message"], "Done");
+        server.verify();
+    }
+}
+
+#[test]
+fn schema_management_preserves_backend_authorization_errors() {
+    let mut expected = request(
+        "POST",
+        format!("/search/{ACCOUNT}/kusto"),
+        None,
+        json!({"message":"Table management requires account-management capability.","errors":[]}),
+    );
+    expected.status = 400;
+    let server = Server::new(vec![expected]);
+    let cfg = Config::new();
+    cfg.write(&server.url, Some(ACCOUNT));
+    let result = cfg.run(&["schema", "add-column", "logs", "message", "string"]);
+    assert!(!result.status.success());
+    assert!(
+        stderr(&result).contains("account-management"),
+        "{}",
+        stderr(&result)
+    );
+    server.verify();
+}
