@@ -233,8 +233,15 @@ impl UploadOptions<'_> {
                 request = request.bearer_auth(token);
             }
             let (body, transfer, compressed) = if let Some(caps) = capabilities {
-                let (body, transfer, compressed) = columnar::body(file, if ext == "tsv" { b'\t' } else { b',' }, caps,
-                    self.null_values.to_vec(), Arc::clone(&sent), file_size, pretty_progress, self.encoding == UploadEncoding::Auto)?;
+                let options = columnar::Options {
+                    delimiter: if ext == "tsv" { b'\t' } else { b',' },
+                    capabilities: caps,
+                    null_values: self.null_values.to_vec(),
+                    adaptive_compression: self.encoding == UploadEncoding::Auto,
+                };
+                let (body, transfer, compressed) = columnar::body(
+                    file, options, Arc::clone(&sent), file_size, pretty_progress,
+                )?;
                 if compressed { request = request.header(reqwest::header::CONTENT_ENCODING, "gzip"); }
                 (reqwest::Body::wrap(body), Some(transfer), compressed)
             } else {

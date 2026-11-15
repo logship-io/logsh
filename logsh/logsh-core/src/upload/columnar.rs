@@ -231,16 +231,26 @@ impl Read for CountedFile {
     }
 }
 
+pub(super) struct Options {
+    pub delimiter: u8,
+    pub capabilities: Capabilities,
+    pub null_values: Vec<String>,
+    pub adaptive_compression: bool,
+}
+
 pub(super) fn body(
     mut file: File,
-    delimiter: u8,
-    capabilities: Capabilities,
-    null_values: Vec<String>,
+    options: Options,
     sent: Arc<AtomicU64>,
     total: u64,
     pretty: bool,
-    adaptive_compression: bool,
 ) -> io::Result<(UploadBody, Arc<Transfer>, bool)> {
+    let Options {
+        delimiter,
+        capabilities,
+        null_values,
+        adaptive_compression,
+    } = options;
     let compressed = !adaptive_compression
         || should_compress(&mut file, delimiter, &capabilities, &null_values)?;
     let transfer = Arc::new(Transfer::default());
@@ -678,7 +688,7 @@ fn encode<R: Read, W: Write + Send>(
         drop(free_rx);
         let writing = worker
             .join()
-            .map_err(|_| io::Error::new(io::ErrorKind::Other, "Column writer panicked"))?;
+            .map_err(|_| io::Error::other("Column writer panicked"))?;
         match (production, writing) {
             (Err(error), Err(writing)) if error.kind() == io::ErrorKind::BrokenPipe => Err(writing),
             (Err(error), _) => Err(error),
